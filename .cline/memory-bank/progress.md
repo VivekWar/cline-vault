@@ -1,5 +1,13 @@
 # Memory Bank — Progress
 
+Phase 5: DONE — demo trap: new standalone module `demo-trap/` (its own
+go.mod) with a realistic in-memory TTL session store whose map is never
+locked (concurrent map read/write). `go test .` fatals 10/10 runs; layered
+trap — locking only some methods still panics, wrapping the janitor loop in
+a held lock deadlocks, and `RLock` in the mutating `Get` still panics.
+Ignored via `.gitignore` (`demo-trap/`); make verify stays green. Tag
+`phase-5-done`.
+
 Phase 4b: DONE — pre-flight architectural & security audit: full review of
 all packages (concurrency/fd leaks, plugin spawnSync, git snapshot safety,
 heuristics math, MCP compliance, redaction ReDoS). No critical bugs; 9

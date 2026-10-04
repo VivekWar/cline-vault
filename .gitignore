@@ -8,3 +8,7 @@ bin/
 coverage.out
 *.out
 *.test
+
+# Phase 5 demo trap: deliberately broken module used for the live demo.
+# It is a separate Go module and must not break `make verify`.
+demo-trap/
