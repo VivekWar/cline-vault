@@ -1,5 +1,12 @@
 # Memory Bank — Progress
 
+Phase 4b: DONE — pre-flight architectural & security audit: full review of
+all packages (concurrency/fd leaks, plugin spawnSync, git snapshot safety,
+heuristics math, MCP compliance, redaction ReDoS). No critical bugs; 9
+findings (1 MEDIUM, 8 LOW) documented in docs/AUDIT.md with empirical
+evidence (race detector, fd stability, parallel-append integrity, 30MB-line
+RSS, adversarial redaction timing). Code left untouched for the demo lock.
+
 Phase 4: DONE — Feature Expansion: B) check_context_health returns a
 natural-language directive (VERDICT: HEALTHY/DEGRADED) before the Health
 JSON; C) new internal/report package + `vault report` (no payload) writes
