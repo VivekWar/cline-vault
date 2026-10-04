@@ -11,12 +11,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 
 	"vault/internal/mcp"
-	"vault/internal/report"
 	"vault/internal/state"
 )
 
@@ -31,9 +29,6 @@ func main() {
 			return
 		case "report":
 			runReport(os.Args[2:])
-			return
-		case "serve":
-			runServe(os.Args[2:])
 			return
 		}
 	}
@@ -65,15 +60,11 @@ func runHealth(args []string) {
 	fmt.Fprintln(os.Stdout, out)
 }
 
-// runReport implements the `vault report` subcommand with two forms:
-//
-//   - `vault report [--root DIR]` (no positional argument) generates the
-//     self-contained HTML report at <root>/.vault/report.html (Feature C).
-//   - `vault report [--root DIR] '<json-args>'` feeds the JSON arguments
-//     payload to report_activity (which takes the git snapshot and appends
-//     the activity line) and prints the tool result. The telemetry plugin
-//     uses this form so every activity goes through the Go server instead of
-//     direct file writes.
+// runReport implements `vault report [--root DIR] '<json-args>'`: it feeds the
+// JSON arguments payload to report_activity (which takes the git snapshot and
+// appends the activity line) and prints the tool result. The telemetry plugin
+// uses this subcommand so every activity goes through the Go server instead of
+// direct file writes.
 func runReport(args []string) {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
@@ -81,9 +72,9 @@ func runReport(args []string) {
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	if fs.NArg() == 0 {
-		runReportHTML(*root)
-		return
+	if fs.NArg() < 1 {
+		log.Printf("vault report: missing JSON arguments payload")
+		os.Exit(2)
 	}
 
 	payload := fs.Arg(0)
@@ -91,41 +82,6 @@ func runReport(args []string) {
 	text, isErr := st.DispatchTool("report_activity", json.RawMessage(payload))
 	fmt.Fprintln(os.Stdout, text)
 	if isErr {
-		os.Exit(1)
-	}
-}
-
-// runReportHTML implements `vault report` with no payload: it generates
-// <root>/.vault/report.html and prints the path written.
-func runReportHTML(root string) {
-	path, err := report.Generate(absRoot(root))
-	if err != nil {
-		log.Printf("vault report: %v", err)
-		os.Exit(1)
-	}
-	fmt.Fprintln(os.Stdout, "wrote "+path)
-}
-
-// runServe implements `vault serve [--root DIR] [--addr :8080]`: it registers
-// the dashboard routes on the DefaultServeMux — "/" serves the HTML shell
-// (head + HTMX script + polling div) and "/content" serves only the inner
-// content fragment that HTMX swaps in every second — then serves HTTP.
-func runServe(args []string) {
-	fs := flag.NewFlagSet("serve", flag.ExitOnError)
-	fs.SetOutput(os.Stderr)
-	root := fs.String("root", "", "vault root (default VAULT_ROOT or cwd)")
-	addr := fs.String("addr", ":8080", "listen address")
-	if err := fs.Parse(args); err != nil {
-		os.Exit(2)
-	}
-
-	r := absRoot(*root)
-	http.HandleFunc("/", report.DashboardHandler(r))
-	http.HandleFunc("/content", report.ContentHandler(r))
-	http.HandleFunc("/htmx.min.js", report.HTMXHandler())
-	log.Printf("vault serve: dashboard at http://localhost%s (root %s)", *addr, r)
-	if err := http.ListenAndServe(*addr, nil); err != nil {
-		log.Printf("vault serve: %v", err)
 		os.Exit(1)
 	}
 }
