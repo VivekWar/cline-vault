@@ -189,7 +189,7 @@ User-reported issues: none required.
 
 ## Metadata
 
-- Commit: `PENDING_HASH` (`docs: phase 5 demo trap report`; tagged
+- Commit: `afc1588` (`docs: phase 5 demo trap report`; tagged
   `phase-5-done`)
 - Tag: `phase-5-done`
 - Branch: `cline/01800` (fast-forwarded into `main`)
