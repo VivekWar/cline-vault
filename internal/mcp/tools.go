@@ -17,9 +17,10 @@ type tool struct {
 
 // Tool input schemas (compact, valid JSON Schema).
 const (
-	reportActivitySchema = `{"type":"object","properties":{"kind":{"type":"string","enum":["READ","EDIT","COMMAND","TEST","COMMIT"]},"command":{"type":"string"},"exit_code":{"type":"integer"},"stderr":{"type":"string"},"files":{"type":"array","items":{"type":"string"}}},"required":["kind"],"additionalProperties":false}`
-	checkHealthSchema    = `{"type":"object","properties":{},"additionalProperties":false}`
-	createHandoffSchema  = `{"type":"object","properties":{"goal":{"type":"string"},"decisions":{"type":"string"},"completed_work":{"type":"string"},"blocker":{"type":"string"},"failed_attempts":{"type":"array","items":{"type":"string"}},"next_action":{"type":"string"}},"required":["goal","next_action"],"additionalProperties":false}`
+	reportActivitySchema = `{"type":"object","properties":{"kind":{"type":"string","enum":["READ","EDIT","COMMAND","TEST","COMMIT"]},"command":{"type":"string"},"exit_code":{"type":"integer"},"stderr":{"type":"string"},"files":{"type":"array","items":{"type":"string"}},"workspace":{"type":"string"}},"required":["kind"],"additionalProperties":false}`
+	checkHealthSchema    = `{"type":"object","properties":{"workspace":{"type":"string"}},"additionalProperties":false}`
+	createHandoffSchema  = `{"type":"object","properties":{"goal":{"type":"string"},"decisions":{"type":"string"},"completed_work":{"type":"string"},"blocker":{"type":"string"},"failed_attempts":{"type":"array","items":{"type":"string"}},"next_action":{"type":"string"},"workspace":{"type":"string"}},"required":["goal","next_action"],"additionalProperties":false}`
+	readHandoffSchema    = `{"type":"object","properties":{},"additionalProperties":false}`
 )
 
 // tools is the fixed tool list exposed by tools/list.
@@ -38,6 +39,11 @@ var tools = []tool{
 		Name:        "create_handoff",
 		Description: "Write a handoff state file from the session summary and activity log.",
 		InputSchema: json.RawMessage(createHandoffSchema),
+	},
+	{
+		Name:        "read_handoff",
+		Description: "Return the full text of the current handoff state file (no handoff yet -> error).",
+		InputSchema: json.RawMessage(readHandoffSchema),
 	},
 }
 

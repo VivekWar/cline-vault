@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -16,6 +17,7 @@ import (
 type State struct {
 	root  string // absolute project root (VAULT_ROOT or cwd)
 	vault string // root/.vault, created on demand at the first write
+	log   *log.Logger
 }
 
 // New returns a State for the given root, resolved to an absolute path.
@@ -25,7 +27,7 @@ func New(root string) *State {
 	if err != nil {
 		abs = root
 	}
-	return &State{root: abs, vault: filepath.Join(abs, ".vault")}
+	return &State{root: abs, vault: filepath.Join(abs, ".vault"), log: log.New(os.Stderr, "", 0)}
 }
 
 // Root returns the absolute root path.
@@ -41,12 +43,13 @@ func (s *State) activityPath() string { return filepath.Join(s.vault, "activity.
 
 // activityEntry is one JSON line in activity.jsonl.
 type activityEntry struct {
-	Time     string   `json:"time"`
-	Kind     string   `json:"kind"`
-	Command  string   `json:"command"`
-	ExitCode int      `json:"exit_code"`
-	Stderr   string   `json:"stderr"`
-	Files    []string `json:"files"`
+	Time      string   `json:"time"`
+	Kind      string   `json:"kind"`
+	Command   string   `json:"command"`
+	ExitCode  int      `json:"exit_code"`
+	Stderr    string   `json:"stderr"`
+	Files     []string `json:"files"`
+	Workspace string   `json:"workspace"`
 }
 
 // validKinds is the fixed enum of activity kinds.
@@ -60,9 +63,11 @@ func (s *State) DispatchTool(name string, arguments json.RawMessage) (string, bo
 	case "report_activity":
 		return s.reportActivity(arguments)
 	case "check_context_health":
-		return s.checkContextHealth()
+		return s.checkContextHealth(arguments)
 	case "create_handoff":
 		return s.createHandoff(arguments)
+	case "read_handoff":
+		return s.readHandoff()
 	default:
 		return "unknown tool: " + name, true
 	}
@@ -71,11 +76,12 @@ func (s *State) DispatchTool(name string, arguments json.RawMessage) (string, bo
 // reportActivity appends one activity line and returns "recorded #N".
 func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	var args struct {
-		Kind     string   `json:"kind"`
-		Command  string   `json:"command"`
-		ExitCode int      `json:"exit_code"`
-		Stderr   string   `json:"stderr"`
-		Files    []string `json:"files"`
+		Kind      string   `json:"kind"`
+		Command   string   `json:"command"`
+		ExitCode  int      `json:"exit_code"`
+		Stderr    string   `json:"stderr"`
+		Files     []string `json:"files"`
+		Workspace string   `json:"workspace"`
 	}
 	if len(argsJSON) > 0 && string(argsJSON) != "null" {
 		if err := json.Unmarshal(argsJSON, &args); err != nil {
@@ -92,12 +98,13 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 		args.Files = []string{}
 	}
 	entry := activityEntry{
-		Time:     time.Now().UTC().Format(time.RFC3339),
-		Kind:     args.Kind,
-		Command:  args.Command,
-		ExitCode: args.ExitCode,
-		Stderr:   args.Stderr,
-		Files:    args.Files,
+		Time:      time.Now().UTC().Format(time.RFC3339),
+		Kind:      args.Kind,
+		Command:   args.Command,
+		ExitCode:  args.ExitCode,
+		Stderr:    args.Stderr,
+		Files:     args.Files,
+		Workspace: args.Workspace,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {
@@ -123,8 +130,17 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	return fmt.Sprintf("recorded #%d", n), false
 }
 
-// checkContextHealth is a STUB: always score 100 until heuristics land.
-func (s *State) checkContextHealth() (string, bool) {
+// checkContextHealth is a STUB: always score 100 until heuristics land. The
+// optional workspace arg is accepted for API parity but unused by the stub.
+func (s *State) checkContextHealth(argsJSON json.RawMessage) (string, bool) {
+	var args struct {
+		Workspace string `json:"workspace"`
+	}
+	if len(argsJSON) > 0 && string(argsJSON) != "null" {
+		if err := json.Unmarshal(argsJSON, &args); err != nil {
+			return fmt.Sprintf("invalid arguments: %v", err), true
+		}
+	}
 	n, err := s.countActivities()
 	if err != nil {
 		return fmt.Sprintf("cannot count activities: %v", err), true
@@ -151,4 +167,17 @@ func (s *State) countActivities() (int, error) {
 		return 0, err
 	}
 	return bytes.Count(data, []byte{'\n'}), nil
+}
+
+// readHandoff returns the full text of handoff_state.md, or an error result
+// when no handoff has been written yet.
+func (s *State) readHandoff() (string, bool) {
+	data, err := os.ReadFile(filepath.Join(s.vault, "handoff_state.md"))
+	if errors.Is(err, os.ErrNotExist) {
+		return "no handoff yet", true
+	}
+	if err != nil {
+		return fmt.Sprintf("cannot read handoff: %v", err), true
+	}
+	return string(data), false
 }

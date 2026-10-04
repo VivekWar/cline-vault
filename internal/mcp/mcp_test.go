@@ -90,14 +90,14 @@ func TestServeTranscript(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &list); err != nil {
 		t.Fatalf("unmarshal tools/list: %v", err)
 	}
-	if len(list.Result.Tools) != 3 {
-		t.Errorf("(c) tools/list has %d tools, want exactly 3", len(list.Result.Tools))
+	if len(list.Result.Tools) != 4 {
+		t.Errorf("(c) tools/list has %d tools, want exactly 4", len(list.Result.Tools))
 	}
 	got := map[string]bool{}
 	for _, tool := range list.Result.Tools {
 		got[tool.Name] = true
 	}
-	for _, want := range []string{"report_activity", "check_context_health", "create_handoff"} {
+	for _, want := range []string{"report_activity", "check_context_health", "create_handoff", "read_handoff"} {
 		if !got[want] {
 			t.Errorf("(c) tools/list missing tool %q", want)
 		}

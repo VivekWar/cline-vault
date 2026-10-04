@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -60,19 +63,19 @@ func TestCreateHandoff(t *testing.T) {
 
 	args := `{"goal":"G","decisions":"D","completed_work":"CW","blocker":"B",` +
 		`"failed_attempts":["f1","f2"],"next_action":"NA"}`
-	path, isErr := st.createHandoff(json.RawMessage(args))
+	text, isErr := st.createHandoff(json.RawMessage(args))
 	if isErr {
-		t.Fatalf("createHandoff failed: %s", path)
+		t.Fatalf("createHandoff failed: %s", text)
 	}
 	wantPath := filepath.Join(st.vault, "handoff_state.md")
-	if path != wantPath {
-		t.Errorf("returned path = %q, want %q", path, wantPath)
+	if !strings.HasPrefix(text, wantPath) {
+		t.Errorf("result = %q, want prefix %q", text, wantPath)
 	}
-	if !filepath.IsAbs(path) {
-		t.Errorf("returned path is not absolute: %q", path)
+	if !filepath.IsAbs(wantPath) {
+		t.Errorf("handoff path not absolute: %q", wantPath)
 	}
 
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(wantPath)
 	if err != nil {
 		t.Fatalf("read handoff: %v", err)
 	}
@@ -139,4 +142,181 @@ func TestCreateHandoffMissingGoal(t *testing.T) {
 	if !strings.Contains(text, "goal") {
 		t.Errorf("error text should mention goal: %s", text)
 	}
+}
+
+// TestCreateHandoffUsesWorkspaceGit: when workspace is an absolute git repo,
+// the git section reflects that directory (branch + commit), not VAULT_ROOT.
+func TestCreateHandoffUsesWorkspaceGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ws := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = ws
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "f.txt")
+	git("commit", "-q", "-m", "c1")
+
+	short := gitOut(t, ws, "rev-parse", "--short", "HEAD")
+
+	st := New(t.TempDir()) // VAULT_ROOT is a separate, non-repo temp dir
+	text, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA","workspace":"` + ws + `"}`))
+	if isErr {
+		t.Fatalf("createHandoff: %s", text)
+	}
+	content := readHandoffFile(t, st)
+	if !strings.Contains(content, "workspace: "+ws) {
+		t.Errorf("git section missing workspace path:\n%s", content)
+	}
+	if !strings.Contains(content, "branch: main") {
+		t.Errorf("git section missing branch:\n%s", content)
+	}
+	if !strings.Contains(content, "commit: "+short) {
+		t.Errorf("git section missing commit %s:\n%s", short, content)
+	}
+}
+
+// TestGitDirFallback: non-absolute or non-git workspaces fall back to root.
+func TestGitDirFallback(t *testing.T) {
+	st := New(t.TempDir())
+	st.log = log.New(io.Discard, "", 0)
+	for _, ws := range []string{"", "relative/path", "/this/does/not/exist"} {
+		if got := st.gitDir(ws); got != st.root {
+			t.Errorf("gitDir(%q) = %q, want VAULT_ROOT %q", ws, got, st.root)
+		}
+	}
+	// A relative workspace must not error the whole handoff.
+	text, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA","workspace":"relative/path"}`))
+	if isErr {
+		t.Fatalf("createHandoff with relative workspace must not error: %s", text)
+	}
+}
+
+// TestReadHandoff: error before any handoff, content after one is created.
+func TestReadHandoff(t *testing.T) {
+	st := New(t.TempDir())
+	text, isErr := st.readHandoff()
+	if !isErr {
+		t.Fatalf("readHandoff before handoff: want isError, got %q", text)
+	}
+	if text != "no handoff yet" {
+		t.Errorf("got %q, want 'no handoff yet'", text)
+	}
+	if _, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA"}`)); isErr {
+		t.Fatal("createHandoff failed")
+	}
+	text, isErr = st.readHandoff()
+	if isErr {
+		t.Fatalf("readHandoff after handoff: unexpected error %q", text)
+	}
+	if !strings.HasPrefix(text, "# Vault Handoff\n") {
+		t.Errorf("readHandoff missing title: %q", text)
+	}
+}
+
+// TestActivityRotation: after create_handoff the activity log is archived and
+// the next report_activity starts back at #1; with no activity, rotation is
+// skipped and reported as "none".
+func TestActivityRotation(t *testing.T) {
+	t.Run("with activity", func(t *testing.T) {
+		st := New(t.TempDir())
+		mustReport(t, st, `{"kind":"COMMAND","command":"a","exit_code":0,"files":["a.go"]}`)
+		mustReport(t, st, `{"kind":"COMMAND","command":"b","exit_code":0,"files":["b.go"]}`)
+		text, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA"}`))
+		if isErr {
+			t.Fatalf("createHandoff: %s", text)
+		}
+		if !strings.Contains(text, "activity archived to: ") || strings.Contains(text, "activity archived to: none") {
+			t.Errorf("result missing a real archive path: %s", text)
+		}
+		matches, _ := filepath.Glob(filepath.Join(st.vault, "archive", "activity-*.jsonl"))
+		if len(matches) != 1 {
+			t.Fatalf("archive files = %d, want 1", len(matches))
+		}
+		if got := mustReport(t, st, `{"kind":"COMMAND","command":"c","exit_code":0,"files":["c.go"]}`); got != "recorded #1" {
+			t.Errorf("after rotation got %q, want 'recorded #1'", got)
+		}
+	})
+	t.Run("no activity", func(t *testing.T) {
+		st := New(t.TempDir())
+		text, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA"}`))
+		if isErr {
+			t.Fatalf("createHandoff: %s", text)
+		}
+		if !strings.Contains(text, "activity archived to: none") {
+			t.Errorf("result missing 'none' for empty activity: %s", text)
+		}
+		if _, err := os.Stat(filepath.Join(st.vault, "archive")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("archive dir must not be created when nothing to archive (err=%v)", err)
+		}
+	})
+}
+
+// TestHandoffTitleAndEmptySections: title + resume line first, empty sections
+// render "_none_".
+func TestHandoffTitleAndEmptySections(t *testing.T) {
+	st := New(t.TempDir())
+	if _, isErr := st.createHandoff(json.RawMessage(`{"goal":"G","next_action":"NA"}`)); isErr {
+		t.Fatal("createHandoff failed")
+	}
+	content := readHandoffFile(t, st)
+	wantPrefix := "# Vault Handoff\nResume: continue from Next Immediate Action. Do NOT repeat anything in Failed Attempts.\n"
+	if !strings.HasPrefix(content, wantPrefix) {
+		t.Errorf("title/resume line not first:\n%s", content)
+	}
+	for _, sec := range []string{
+		"## Architecture & Decisions\n_none_",
+		"## Completed Work\n_none_",
+		"## Current Blocker & Active Errors\n_none_",
+		"## Failed Attempts (Do Not Repeat)\n_none_",
+		"## Touched Files & AST Scope\n_none_\nAST scope: not computed (paths only)",
+	} {
+		if !strings.Contains(content, sec) {
+			t.Errorf("missing empty section %q:\n%s", sec, content)
+		}
+	}
+}
+
+// TestReportActivityStoresWorkspace: the workspace arg is persisted per entry.
+func TestReportActivityStoresWorkspace(t *testing.T) {
+	st := New(t.TempDir())
+	mustReport(t, st, `{"kind":"COMMAND","command":"c","exit_code":0,"files":["x.go"],"workspace":"/tmp/ws"}`)
+	data, err := os.ReadFile(filepath.Join(st.vault, "activity.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"workspace":"/tmp/ws"`) {
+		t.Errorf("workspace not stored in activity line: %s", data)
+	}
+}
+
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", args, err)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func readHandoffFile(t *testing.T, st *State) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(st.vault, "handoff_state.md"))
+	if err != nil {
+		t.Fatalf("read handoff: %v", err)
+	}
+	return string(data)
 }

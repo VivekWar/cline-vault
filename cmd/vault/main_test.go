@@ -52,7 +52,7 @@ func TestEndToEnd(t *testing.T) {
 		}
 	}
 
-	// The second line must be tools/list with exactly 3 tools.
+	// The second line must be tools/list with exactly 4 tools.
 	var list struct {
 		Result struct {
 			Tools []struct {
@@ -63,8 +63,8 @@ func TestEndToEnd(t *testing.T) {
 	if err := json.Unmarshal([]byte(lines[1]), &list); err != nil {
 		t.Fatalf("unmarshal tools/list: %v", err)
 	}
-	if len(list.Result.Tools) != 3 {
-		t.Errorf("tools/list returned %d tools, want 3", len(list.Result.Tools))
+	if len(list.Result.Tools) != 4 {
+		t.Errorf("tools/list returned %d tools, want 4", len(list.Result.Tools))
 	}
 }
 

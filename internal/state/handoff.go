@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // createHandoffArgs is the tools/call arguments for create_handoff.
@@ -18,6 +19,7 @@ type createHandoffArgs struct {
 	Blocker        string   `json:"blocker"`
 	FailedAttempts []string `json:"failed_attempts"`
 	NextAction     string   `json:"next_action"`
+	Workspace      string   `json:"workspace"`
 }
 
 // createHandoff writes root/.vault/handoff_state.md atomically and returns
@@ -43,10 +45,40 @@ func (s *State) createHandoff(argsJSON json.RawMessage) (string, bool) {
 		return fmt.Sprintf("cannot read activity log: %v", err), true
 	}
 	path := filepath.Join(s.vault, "handoff_state.md")
-	if err := atomicWrite(path, buildHandoff(args, activities, s.gitState())); err != nil {
+	if err := atomicWrite(path, buildHandoff(args, activities, s.gitState(args.Workspace))); err != nil {
 		return fmt.Sprintf("cannot write handoff: %v", err), true
 	}
-	return path, false
+	// Rotate the activity log only after the handoff write has succeeded.
+	archivePath, err := s.archiveActivity()
+	if err != nil {
+		return fmt.Sprintf("cannot archive activity log: %v", err), true
+	}
+	archived := "none"
+	if archivePath != "" {
+		archived = archivePath
+	}
+	return path + "\nactivity archived to: " + archived, false
+}
+
+// archiveActivity moves activity.jsonl into .vault/archive/ with a UTC
+// timestamp and returns the new path. It returns ("", nil) when there is no
+// activity to archive.
+func (s *State) archiveActivity() (string, error) {
+	if _, err := os.Stat(s.activityPath()); errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	} else if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(s.vault, "archive")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	name := "activity-" + time.Now().UTC().Format("20060102T150405Z") + ".jsonl"
+	dst := filepath.Join(dir, name)
+	if err := os.Rename(s.activityPath(), dst); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 // readActivities parses activity.jsonl, skipping unparseable lines.
@@ -73,36 +105,55 @@ func (s *State) readActivities() ([]activityEntry, error) {
 }
 
 // buildHandoff renders the handoff state file with the exact H2 section order.
+// Empty sections render "_none_"; the title and resume line come first.
 func buildHandoff(args createHandoffArgs, acts []activityEntry, git string) string {
 	var b strings.Builder
-	b.WriteString("## Goal\n")
-	b.WriteString(args.Goal)
+	b.WriteString("# Vault Handoff\n")
+	b.WriteString("Resume: continue from Next Immediate Action. Do NOT repeat anything in Failed Attempts.\n")
+	b.WriteString("\n## Goal\n")
+	b.WriteString(orNone(args.Goal))
 	b.WriteString("\n\n## Architecture & Decisions\n")
-	b.WriteString(args.Decisions)
+	b.WriteString(orNone(args.Decisions))
 	b.WriteString("\n\n## Touched Files & AST Scope\n")
-	for _, f := range dedupFiles(acts) {
-		b.WriteString(f)
-		b.WriteByte('\n')
+	if files := dedupFiles(acts); len(files) == 0 {
+		b.WriteString("_none_\n")
+	} else {
+		for _, f := range files {
+			b.WriteString(f)
+			b.WriteByte('\n')
+		}
 	}
 	b.WriteString("AST scope: not computed (paths only)\n")
 	b.WriteString("\n## Completed Work\n")
-	b.WriteString(args.CompletedWork)
+	b.WriteString(orNone(args.CompletedWork))
 	b.WriteString("\n\n## Current Blocker & Active Errors\n")
-	b.WriteString(args.Blocker)
+	b.WriteString(orNone(args.Blocker))
 	b.WriteByte('\n')
 	b.WriteString(activeErrors(acts))
 	b.WriteString("\n\n## Failed Attempts (Do Not Repeat)\n")
-	for _, fa := range args.FailedAttempts {
-		b.WriteString("- ")
-		b.WriteString(fa)
-		b.WriteByte('\n')
+	if len(args.FailedAttempts) == 0 {
+		b.WriteString("_none_\n")
+	} else {
+		for _, fa := range args.FailedAttempts {
+			b.WriteString("- ")
+			b.WriteString(fa)
+			b.WriteByte('\n')
+		}
 	}
 	b.WriteString("\n## Next Immediate Action\n")
-	b.WriteString(args.NextAction)
+	b.WriteString(orNone(args.NextAction))
 	b.WriteString("\n\n## Git State & Checkpoint Tag\n")
 	b.WriteString(git)
 	b.WriteByte('\n')
 	return b.String()
+}
+
+// orNone renders an empty value as "_none_".
+func orNone(s string) string {
+	if strings.TrimSpace(s) == "" {
+		return "_none_"
+	}
+	return s
 }
 
 // dedupFiles returns the de-duplicated union of files across activities in
@@ -159,15 +210,40 @@ func truncateLines(s string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// gitState returns the git commit and porcelain status of root, or
-// "git unavailable" when git fails (never an error).
-func (s *State) gitState() string {
-	short, err1 := gitOutput(s.root, "rev-parse", "--short", "HEAD")
-	status, err2 := gitOutput(s.root, "status", "--porcelain")
-	if err1 != nil || err2 != nil {
+// gitState returns the workspace path, branch, short HEAD hash and porcelain
+// status of the resolved git dir, or "git unavailable" (never an error).
+func (s *State) gitState(workspace string) string {
+	dir := s.gitDir(workspace)
+	branch, err1 := gitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	short, err2 := gitOutput(dir, "rev-parse", "--short", "HEAD")
+	status, err3 := gitOutput(dir, "status", "--porcelain")
+	if err1 != nil || err2 != nil || err3 != nil {
 		return "git unavailable"
 	}
-	return fmt.Sprintf("commit: %s\nstatus:\n%s", short, status)
+	return fmt.Sprintf("workspace: %s\nbranch: %s\ncommit: %s\nstatus:\n%s", dir, branch, short, status)
+}
+
+// gitDir returns where git commands run: the workspace when it is an absolute
+// path inside a git repo, else VAULT_ROOT. It never errors; fallbacks are
+// logged to stderr.
+func (s *State) gitDir(workspace string) string {
+	if workspace != "" {
+		if !filepath.IsAbs(workspace) {
+			s.log.Printf("workspace %q is not absolute; falling back to VAULT_ROOT %s", workspace, s.root)
+		} else if !isGitRepo(workspace) {
+			s.log.Printf("workspace %q is not inside a git repo; falling back to VAULT_ROOT %s", workspace, s.root)
+		} else {
+			return workspace
+		}
+	}
+	return s.root
+}
+
+// isGitRepo reports whether dir is inside a git repository.
+func isGitRepo(dir string) bool {
+	cmd := exec.Command("git", "rev-parse", "--git-dir")
+	cmd.Dir = dir
+	return cmd.Run() == nil
 }
 
 // gitOutput runs git in dir and returns trimmed stdout.

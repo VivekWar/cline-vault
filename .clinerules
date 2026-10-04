@@ -25,8 +25,10 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 - Commit after each green milestone with a clear message.
 - Work in small steps; propose a plan before large changes.
 - Update .cline/memory-bank/progress.md at the end of every task.
+- After a green commit, fast-forward main: git -C /home/vivek/Documents/ClineAiHackathon merge --ff-only <your current branch>, then run make -C /home/vivek/Documents/ClineAiHackathon build.
 
 ## Vault telemetry (MANDATORY)
-- After EVERY terminal command, immediately call the vault MCP tool report_activity with: kind (TEST for test runs, otherwise COMMAND), command, exit_code, stderr (last 40 lines if it failed), and files involved.
-- After every file edit, call report_activity with kind EDIT and the edited files.
-- Never skip this, even for trivial commands.
+- Run ONE command per terminal call. No `;` or `&&` chains.
+- Immediately after EACH command, call vault report_activity. Do not batch calls. Use kind TEST for test runs, otherwise COMMAND. Pass the verbatim exit_code, the last 40 lines of stderr if the command failed, the files involved, and workspace = your absolute current directory.
+- After every file edit, call report_activity with kind EDIT, the files, and workspace.
+- To resume previous work, call vault read_handoff first.
