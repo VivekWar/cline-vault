@@ -1,5 +1,15 @@
 # Memory Bank — Progress
 
+Phase 6: DONE — one-command install + README + push: `make install`
+(scripts/install.sh) verifies Go 1.21+/git, builds bin/vault, registers the
+vault MCP server idempotently (Go `mcp-register` subcommand, backup +
+preserve other servers, Linux/macOS path detection), npm ci when node
+exists, .clinerules context-health hook, `bin/vault health` smoke test.
+`make uninstall` removes only the MCP entry. README.md written (9 sections,
+no vault serve — removed per user). Installer verified against temp HOME;
+make verify green; merged into main (non-ff, progress.md conflict resolved)
+and pushed to origin with tags.
+
 Phase 4 (revised): DONE — Feature Expansion: B) check_context_health returns
 a natural-language directive (VERDICT: HEALTHY/DEGRADED) before the Health
 JSON; D) pure heuristics.Redact masks sk- keys, bearer tokens, PEM private
