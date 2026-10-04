@@ -76,3 +76,52 @@ Smoke test (acceptance criterion 2) printed exactly 2 JSON lines:
 $ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}\n' | VAULT_ROOT=$(mktemp -d) ./bin/vault 2>/dev/null | wc -l
 2
 ```
+
+---
+
+# Phase 1b addendum — worktree-awareness, read_handoff, activity rotation
+
+## (a) Manual verification results (observed before the fixes)
+
+1. **MCP server registered with 3 tools** — `tools/list` reported
+   `report_activity`, `check_context_health`, `create_handoff`. A live
+   `tools/call` succeeded.
+2. **Resume test FAILED** — a fresh task in its own git worktree
+   (`~/.cline/worktrees/<id>/ClineAiHackathon`, branch `cline/<id>`) could not
+   find `.vault/handoff_state.md` by relative path, and `git` commands run
+   against `VAULT_ROOT` did not see the agent's edits. Root cause: the server
+   is started once with `VAULT_ROOT` = the main checkout, but each task runs in
+   a separate worktree, so worktree-relative state and git state were missing.
+3. **Telemetry risk test** — 6 activity entries were logged for 5 actions: the
+   calls were **batched** (identical timestamps), and one **chained** command
+   hid a failure (reported `exit_code 0` because only the last command's status
+   was captured).
+
+## (b) Fixes made and reasons
+
+| Fix | Reason |
+|---|---|
+| Optional `workspace` arg (absolute path) on `report_activity`, `check_context_health`, `create_handoff`; stored per activity entry | Git must run in the agent's worktree, not the main checkout. |
+| `gitDir`: use `workspace` only when it is absolute AND inside a git repo; otherwise fall back to `VAULT_ROOT` and log the reason to stderr (never error) | A stale/missing/non-repo workspace must not break the tool. |
+| `create_handoff` git section now includes `workspace`, `branch`, `commit`, `status` | Needed to recover which worktree/branch produced the handoff. |
+| New `read_handoff` tool (returns full `handoff_state.md`, else `isError:true` "no handoff yet") | Fresh tasks must be able to locate/resume via the shared `VAULT_ROOT/.vault`. |
+| Activity rotation: after a successful handoff write, move `activity.jsonl` to `.vault/archive/activity-<UTC>.jsonl`; report archive path (or "none") | Next session starts clean; shared state survives worktree deletion. |
+| Handoff format: `# Vault Handoff` title + resume line first; empty sections render `_none_` | Machine-readable resumption instructions. |
+| `.clinerules` telemetry section: ONE command per terminal call, no `;`/`&&`, no batching, report verbatim `exit_code`, pass `workspace`; plus Process rule to `--ff-only` merge main and rebuild after a green commit | Prevents the batched/chained-command telemetry risk observed above. |
+
+## Test evidence — `make verify` (green)
+
+```
+OK   fmt-check (nothing to format)
+OK   vet
+ok  	vault/cmd/vault	0.239s
+ok  	vault/internal/mcp	0.012s
+ok  	vault/internal/state	0.088s
+OK   test
+OK   build (bin/vault)
+verify: all checks passed
+```
+
+Commit: `feat: worktree-aware workspace arg, read_handoff, activity rotation`
+(2299469), tag `phase-1b-done`.
+

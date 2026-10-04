@@ -1,6 +1,29 @@
 # Memory Bank — Progress
 
-## 2026-10-04 — Phase 1: stdio MCP server skeleton
+## 2026-10-04 — Phase 1b: worktree-awareness, read_handoff, activity rotation
+
+**Status: DONE** — `make verify` green; committed
+"feat: worktree-aware workspace arg, read_handoff, activity rotation"
+(2299469), tag `phase-1b-done`.
+
+- Optional `workspace` arg (absolute path) on report_activity /
+  check_context_health / create_handoff; stored per activity entry.
+- `gitDir`: git runs in `workspace` when absolute + inside a git repo,
+  else VAULT_ROOT (fallback logged to stderr, never an error).
+- New `read_handoff` tool (full handoff text, or isError "no handoff yet").
+- Rotation: after a successful handoff write, activity.jsonl -> .vault/archive/
+  activity-<UTC>.jsonl; result reports the archive path (or "none").
+- Handoff format: `# Vault Handoff` title + resume line first; empty sections
+  render `_none_`; git section has workspace/branch/commit/status.
+- `.clinerules`: telemetry rule tightened (one command per call, no batching,
+  verbatim exit_code, workspace arg, read_handoff to resume); Process rule to
+  --ff-only merge main + rebuild after green commit. (34 lines total.)
+- Docs: `docs/phases/PHASE-1.md` Phase 1b addendum.
+- FF-merge main: "Already up to date" (committing directly on main);
+  main `bin/vault` rebuilt.
+
+Next: Phase 2 — real deterministic context-rot heuristics behind
+check_context_health (offline), with testdata fixtures and table-driven tests.
 
 **Status: DONE** — `make verify` green; committed as
 "feat: phase 1 stdio MCP server skeleton", tag `phase-1-done`.
