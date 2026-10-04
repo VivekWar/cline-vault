@@ -1,5 +1,10 @@
 # Memory Bank — Progress
 
+Phase 3b: DONE — telemetry blindspot patch: the plugin now intercepts edit tools
+(write_to_file, replace_file_content, edit_file, insert_content) as kind EDIT so
+H2 churn is fed by pure edit sessions. 19/19 plugin tests + smoke test green;
+committed 4bc554c, tag `phase-3b-done`.
+
 Phase 3: DONE — SDK plugin pivot: `.cline/plugins/vault-telemetry/` TypeScript
 plugin auto-appends every terminal command to `.vault/activity.jsonl` via the
 afterTool hook; manual telemetry instructions removed from `.clinerules`.
