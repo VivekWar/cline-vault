@@ -1,5 +1,9 @@
 # Memory Bank — Progress
 
+Phase 2: DONE — H1 recurring-error-loop (Jaccard), H2 code-oscillation (git tree
+churn), and the Health aggregator; check_context_health is real, `vault health`
+CLI added. `make verify` green; committed 6426b53, tag `phase-2-done`.
+
 Phase 1b: DONE — end-of-phase checklist completed (PHASE-1b.md, tag phase-1b-done, MCP reloaded, logs backed up).
 
 ## 2026-10-04 — Phase 1b: worktree-awareness, read_handoff, activity rotation
