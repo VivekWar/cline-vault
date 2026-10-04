@@ -1,5 +1,17 @@
 # Memory Bank — Progress
 
+Phase 7: DONE — submission documentation: README.md rewritten for
+copy-paste setup (numbered quickstart, dual MCP registration incl. manual
+JSON for Linux/macOS/Windows, plugin + agent-rule steps, verify/uninstall,
+troubleshooting table); ARCHITECTURE.md rewritten (mermaid diagrams,
+package map with line ranges, data formats, heuristics detail with worked
+churn example, design decisions + rejected alternatives, failure modes,
+security, testing); BUILD_STORY.md (phases 0–7 table, pivots, honesty
+statement incl. the one out-of-Cline .clinerules edit d931f91); demo-trap
+regenerated honestly (no sabotage code, scripted-in-narration README,
+real concurrent-map race). No Go behavior changes; make verify green;
+tag `phase-7-done`.
+
 Phase 6: DONE — one-command install + README + push: `make install`
 (scripts/install.sh) verifies Go 1.21+/git, builds bin/vault, registers the
 vault MCP server idempotently (Go `mcp-register` subcommand, backup +
