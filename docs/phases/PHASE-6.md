@@ -132,11 +132,22 @@ Vault installed. Restart Cline.
 
 - `main` (Documents checkout, with Phase 5) and `cline/d7a73` (Phase
   4b/4c-removal/6) diverged at `4bd18f0`; `origin/main` was at `942c645`.
-  Merged `cline/d7a73` into `main` with `--no-ff` (conflict in
-  `.cline/memory-bank/progress.md` resolved by combining both entries).
+  Merged `cline/d7a73` into `main` with `--no-ff` (conflicts in
+  `.cline/memory-bank/progress.md` and `.clinerules` resolved by combining
+  both entries; merge commit `9c285b9`).
 - Deployed binary rebuilt, `tools/list` re-checked (4 tools), MCP settings
-  verified, logs backed up to `~/cline-log-backups/phase-6-<ts>`.
-- Push: see the final summary (recorded exactly as executed).
+  verified (the real `make install` registered the deployed binary path,
+  backup `.bak-20261004T122406Z`), logs backed up to
+  `~/cline-log-backups/phase-6-20261004-1754` (107M).
+- **Push executed:** `git push -u origin main --tags` →
+  - `main`: `942c645..9c285b9` pushed, upstream set ✓
+  - `phase-5-done` (1dd8530): new tag pushed ✓
+  - `phase-6-done` (18992cd): new tag pushed ✓
+  - `phase-4-done`: rejected — the tag already exists on origin (pointing
+    at `942c645`, an ancestor of the new main). Updating it would require a
+    force-push, which is forbidden by `.clinerules`; left untouched and
+    reported. The code itself (web UI removed) is in `main` regardless.
+
 
 ## Known limitations
 
