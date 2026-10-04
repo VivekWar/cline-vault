@@ -1,5 +1,7 @@
 # Memory Bank — Progress
 
+Phase 1b: DONE — end-of-phase checklist completed (PHASE-1b.md, tag phase-1b-done, MCP reloaded, logs backed up).
+
 ## 2026-10-04 — Phase 1b: worktree-awareness, read_handoff, activity rotation
 
 **Status: DONE** — `make verify` green; committed

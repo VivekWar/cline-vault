@@ -26,6 +26,7 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 - Work in small steps; propose a plan before large changes.
 - Update .cline/memory-bank/progress.md at the end of every task.
 - After a green commit, fast-forward main: git -C /home/vivek/Documents/ClineAiHackathon merge --ff-only <your current branch>, then run make -C /home/vivek/Documents/ClineAiHackathon build.
+- At the end of every phase, execute docs/PHASE_CHECKLIST.md completely.
 
 ## Vault telemetry (MANDATORY)
 - Run ONE command per terminal call. No `;` or `&&` chains.
