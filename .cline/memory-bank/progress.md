@@ -1,5 +1,13 @@
 # Memory Bank — Progress
 
+Phase 4c: DONE — real-time dashboard: new `vault serve` HTTP server (default
+:8080, --addr overridable) with "/" shell + "/content" fragment; HTMX 1.9.12
+polls the fragment every 1s (hx-get/hx-trigger/hx-swap innerHTML); premium
+Stripe/Linear light UI (Inter/Roboto + Fira Code/SF Mono, #eaeaea borders,
+pill badges, animated churn bars with transition+growbar keyframe);
+internal/report rewritten around one shared pipeline + 4 templates. make
+verify green; committed 2f2a816, tag `phase-4c-done`.
+
 Phase 4b: DONE — pre-flight architectural & security audit: full review of
 all packages (concurrency/fd leaks, plugin spawnSync, git snapshot safety,
 heuristics math, MCP compliance, redaction ReDoS). No critical bugs; 9
