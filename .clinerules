@@ -1,0 +1,26 @@
+# Vault — Hard Rules
+
+Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
+
+## Language & dependencies
+- Go 1.21+; standard library only.
+- No external dependencies without explicit user approval.
+
+## MCP protocol
+- MCP over stdio, JSON-RPC 2.0. stdout is reserved EXCLUSIVELY for JSON-RPC messages.
+- ALL logging goes to stderr.
+- Notifications (e.g. `initialized`) receive no response.
+
+## Detection
+- Local deterministic heuristics only; no external LLM or network calls.
+
+## Testing
+- Every heuristic gets table-driven unit tests with fixture inputs (testdata/).
+
+## Definition of done
+- Run `make verify` after every change; never claim a task complete unless it passes; show the output.
+
+## Process
+- Commit after each green milestone with a clear message.
+- Work in small steps; propose a plan before large changes.
+- Update .cline/memory-bank/progress.md at the end of every task.
