@@ -225,8 +225,10 @@ owns directive rendering, the report package is ready for extra sections, and
 
 ## Metadata
 
-- Commit: `161b4c8458bd9c7ad3cf87867e21bead6bb71f01` (HEAD at report time)
+- Commit: `7bc509d` (docs; tagged `phase-4-done`); features in
+  `d1ea473`…`161b4c8`
 - Tag: `phase-4-done`
-- Branch: `cline/d7a73`
+- Branch: `cline/d7a73` (fast-forwarded into `main`)
+
 
 
