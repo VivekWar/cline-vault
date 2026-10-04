@@ -32,7 +32,7 @@ var tools = []tool{
 	},
 	{
 		Name:        "check_context_health",
-		Description: "Check AI-agent context health (context-rot detection: recurring error loops and code oscillation).",
+		Description: "Check AI-agent context health (context-rot detection: recurring error loops and code oscillation). Returns a natural-language directive (VERDICT: HEALTHY or VERDICT: DEGRADED) followed by the raw Health JSON.",
 		InputSchema: json.RawMessage(checkHealthSchema),
 	},
 	{

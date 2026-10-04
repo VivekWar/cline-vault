@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -32,8 +33,8 @@ func healthFixture(t *testing.T, name string) string {
 }
 
 // TestCheckContextHealthLoopFlag drives check_context_health over an activity
-// log built from the loop fixtures and expects RECURRING_ERROR_LOOP with
-// status "degraded".
+// log built from the loop fixtures and expects the DEGRADED directive followed
+// by Health JSON carrying RECURRING_ERROR_LOOP with status "degraded".
 func TestCheckContextHealthLoopFlag(t *testing.T) {
 	st := New(t.TempDir())
 	for _, name := range []string{
@@ -49,6 +50,12 @@ func TestCheckContextHealthLoopFlag(t *testing.T) {
 	if isErr {
 		t.Fatalf("checkContextHealth: %s", text)
 	}
+	wantVerdict := "VERDICT: DEGRADED. Stop what you are doing. You are thrashing. " +
+		"Call create_handoff immediately and ask the user to start a new task.\n\n"
+	if !strings.HasPrefix(text, wantVerdict) {
+		t.Errorf("directive = %q, want prefix %q", text, wantVerdict)
+	}
+	jsonText := textAfterDirective(t, text)
 	var h struct {
 		Score  int    `json:"score"`
 		Status string `json:"status"`
@@ -56,11 +63,11 @@ func TestCheckContextHealthLoopFlag(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"flags"`
 	}
-	if err := json.Unmarshal([]byte(text), &h); err != nil {
-		t.Fatalf("unmarshal health: %v (%s)", err, text)
+	if err := json.Unmarshal([]byte(jsonText), &h); err != nil {
+		t.Fatalf("unmarshal health: %v (%s)", err, jsonText)
 	}
 	if h.Status != "degraded" {
-		t.Errorf("status = %q, want degraded (%s)", h.Status, text)
+		t.Errorf("status = %q, want degraded (%s)", h.Status, jsonText)
 	}
 	found := false
 	for _, f := range h.Flags {
@@ -69,6 +76,44 @@ func TestCheckContextHealthLoopFlag(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("flags missing RECURRING_ERROR_LOOP: %s", text)
+		t.Errorf("flags missing RECURRING_ERROR_LOOP: %s", jsonText)
 	}
+}
+
+// TestCheckContextHealthHealthyDirective: an empty activity log must yield the
+// HEALTHY directive followed by valid Health JSON with status "healthy".
+func TestCheckContextHealthHealthyDirective(t *testing.T) {
+	st := New(t.TempDir())
+	text, isErr := st.checkContextHealth(json.RawMessage(`{}`))
+	if isErr {
+		t.Fatalf("checkContextHealth: %s", text)
+	}
+	wantVerdict := "VERDICT: HEALTHY. Continue working.\n\n"
+	if !strings.HasPrefix(text, wantVerdict) {
+		t.Errorf("directive = %q, want prefix %q", text, wantVerdict)
+	}
+	jsonText := textAfterDirective(t, text)
+	var h struct {
+		Score  int    `json:"score"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal([]byte(jsonText), &h); err != nil {
+		t.Fatalf("unmarshal health: %v (%s)", err, jsonText)
+	}
+	if h.Status != "healthy" {
+		t.Errorf("status = %q, want healthy (%s)", h.Status, jsonText)
+	}
+	if h.Score != 100 {
+		t.Errorf("score = %d, want 100 (%s)", h.Score, jsonText)
+	}
+}
+
+// textAfterDirective splits a check_context_health result into its JSON part.
+func textAfterDirective(t *testing.T, text string) string {
+	t.Helper()
+	idx := strings.Index(text, "\n\n")
+	if idx < 0 {
+		t.Fatalf("no directive/JSON separator in %q", text)
+	}
+	return text[idx+2:]
 }

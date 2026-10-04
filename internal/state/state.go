@@ -141,9 +141,18 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	return fmt.Sprintf("recorded #%d", n), false
 }
 
-// checkContextHealth returns the aggregated Health JSON for the session since
-// the last rotation, taking a fresh snapshot of workspace (or VAULT_ROOT) to
-// act as the latest point.
+// Directive prefixes for the check_context_health verdict line.
+const (
+	verdictHealthy  = "VERDICT: HEALTHY. Continue working."
+	verdictDegraded = "VERDICT: DEGRADED. Stop what you are doing. You are thrashing. " +
+		"Call create_handoff immediately and ask the user to start a new task."
+)
+
+// checkContextHealth returns a natural-language directive followed by the
+// aggregated Health JSON for the session since the last rotation (a fresh
+// snapshot of workspace, or VAULT_ROOT, acts as the latest point). Healthy
+// sessions get the continue directive; degraded and critical sessions both get
+// the stop-and-handoff directive.
 func (s *State) checkContextHealth(argsJSON json.RawMessage) (string, bool) {
 	var args struct {
 		Workspace string `json:"workspace"`
@@ -157,7 +166,15 @@ func (s *State) checkContextHealth(argsJSON json.RawMessage) (string, bool) {
 	if err != nil {
 		return fmt.Sprintf("cannot assess health: %v", err), true
 	}
-	return data, false
+	var h heuristics.Health
+	if err := json.Unmarshal([]byte(data), &h); err != nil {
+		return fmt.Sprintf("cannot decode health: %v", err), true
+	}
+	verdict := verdictHealthy
+	if h.Status != "healthy" {
+		verdict = verdictDegraded
+	}
+	return verdict + "\n\n" + data, false
 }
 
 // HealthJSON computes the current context health for workspace (or root) and
