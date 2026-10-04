@@ -121,3 +121,47 @@ func TestHealthCLI(t *testing.T) {
 		t.Errorf("empty repo score = %d, want 100 (%s)", h.Score, stdout.String())
 	}
 }
+
+// TestReportCLI builds the binary and asserts `vault report --root <tmp>
+// '<json>'` routes the payload through report_activity: it prints the tool
+// result and appends the activity line (with the git snapshot attempted).
+func TestReportCLI(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "vault")
+	modRoot := findModuleRoot(t)
+	build := exec.Command("go", "build", "-o", bin, "./cmd/vault")
+	build.Dir = modRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+
+	t.Run("valid payload records", func(t *testing.T) {
+		root := t.TempDir()
+		proc := exec.Command(bin, "report", "--root", root,
+			`{"kind":"EDIT","command":"edited a.go","exit_code":0,"files":["a.go"]}`)
+		var stdout, stderr bytes.Buffer
+		proc.Stdout = &stdout
+		proc.Stderr = &stderr
+		if err := proc.Run(); err != nil {
+			t.Fatalf("vault report exited with error: %v\nstderr: %s", err, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "recorded #1") {
+			t.Errorf("stdout = %q, want 'recorded #1'", stdout.String())
+		}
+		data, err := os.ReadFile(filepath.Join(root, ".vault", "activity.jsonl"))
+		if err != nil {
+			t.Fatalf("read activity.jsonl: %v", err)
+		}
+		if !strings.Contains(string(data), `"kind":"EDIT"`) || !strings.Contains(string(data), "a.go") {
+			t.Errorf("activity line wrong: %s", data)
+		}
+	})
+
+	t.Run("invalid kind exits non-zero", func(t *testing.T) {
+		proc := exec.Command(bin, "report", "--root", t.TempDir(), `{"kind":"BOGUS"}`)
+		var stderr bytes.Buffer
+		proc.Stderr = &stderr
+		if err := proc.Run(); err == nil {
+			t.Fatal("want non-zero exit for invalid kind")
+		}
+	})
+}

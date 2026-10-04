@@ -3,13 +3,14 @@
 // Uses the afterTool lifecycle hook to intercept terminal commands the agent
 // runs (run_commands in the Cline SDK/CLI, execute_command in the VS Code
 // extension) and file edits (write_to_file, replace_file_content, edit_file,
-// insert_content) and appends one JSON line per call to .vault/activity.jsonl
-// in the workspace root, in the exact shape Vault's Go server expects:
-//
-//	{"time":...,"kind":"COMMAND"|"EDIT","command":...,"exit_code":...,"stderr":...,"files":[...],"workspace":...}
+// insert_content). For each intercepted call it spawns the Vault Go binary's
+// `report` subcommand, so the Go server itself takes the git snapshot and
+// appends the line to .vault/activity.jsonl — the plugin never writes the
+// activity log directly.
 //
 // Observational only: the hook never throws and never modifies tool results.
 import type { AgentPlugin } from "@cline/sdk";
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -25,7 +26,6 @@ const EDIT_TOOL_NAMES = new Set(["write_to_file", "replace_file_content", "edit_
 // Workspace root resolved at setup() time from the host workspace context;
 // the hook falls back to VAULT_ROOT or process.cwd() if setup never ran.
 let workspaceRoot = "";
-let activityPath = "";
 
 interface ActivityRecord {
 	kind: "COMMAND" | "EDIT";
@@ -137,19 +137,20 @@ export function lastLines(text: string, n: number): string {
 	return lines.slice(lines.length - n).join("\n");
 }
 
-/** Build the single JSON line Vault's activity log expects. */
-export function buildLine(rec: ActivityRecord, now: Date, workspace: string): string {
-	return (
-		JSON.stringify({
-			time: now.toISOString(),
-			kind: rec.kind,
-			command: rec.command,
-			exit_code: rec.exitCode,
-			stderr: lastLines(rec.output, 40),
-			files: rec.files,
-			workspace: workspace,
-		}) + "\n"
-	);
+/**
+ * Build the report_activity arguments payload matching Vault's
+ * reportActivitySchema (internal/mcp/tools.go). The Go server adds the
+ * timestamp itself, so no `time` field is included here.
+ */
+export function buildPayload(rec: ActivityRecord, workspace: string): string {
+	return JSON.stringify({
+		kind: rec.kind,
+		command: rec.command,
+		exit_code: rec.exitCode,
+		stderr: lastLines(rec.output, 40),
+		files: rec.files,
+		workspace: workspace,
+	});
 }
 
 /** Resolve the workspace root from the plugin setup context. */
@@ -164,13 +165,47 @@ function resolveRoot(setupCtx: unknown): string {
 	return process.cwd();
 }
 
-function appendLine(rec: ActivityRecord): void {
-	if (!activityPath) {
-		workspaceRoot = resolveRoot(undefined);
-		activityPath = path.join(workspaceRoot, ".vault", "activity.jsonl");
+/** Locate the vault binary: VAULT_BIN, else <workspace>/bin/vault, else PATH. */
+function vaultBinary(): string {
+	if (process.env.VAULT_BIN) {
+		return process.env.VAULT_BIN;
 	}
-	fs.mkdirSync(path.dirname(activityPath), { recursive: true });
-	fs.appendFileSync(activityPath, buildLine(rec, new Date(), workspaceRoot), "utf8");
+	if (workspaceRoot) {
+		const candidate = path.join(workspaceRoot, "bin", "vault");
+		if (fs.existsSync(candidate)) {
+			return candidate;
+		}
+	}
+	return "vault";
+}
+
+/**
+ * Report one activity record through the vault binary's `report` subcommand.
+ * Going through the Go server is what keeps the `tree` field populated (the
+ * server takes the git snapshot), which H2 churn depends on.
+ */
+function report(rec: ActivityRecord): void {
+	if (!workspaceRoot) {
+		workspaceRoot = resolveRoot(undefined);
+	}
+	const payload = buildPayload(rec, workspaceRoot);
+	const res = spawnSync(vaultBinary(), ["report", "--root", workspaceRoot, payload], {
+		cwd: workspaceRoot,
+		timeout: 30000,
+		encoding: "utf8",
+	});
+	if (res.error) {
+		console.error("[vault-telemetry] cannot spawn vault binary:", res.error.message);
+		return;
+	}
+	if (res.status !== 0) {
+		console.error(
+			"[vault-telemetry] vault report failed with status",
+			res.status,
+			":",
+			(res.stderr ?? "").toString().trim(),
+		);
+	}
 }
 
 const plugin: AgentPlugin = {
@@ -178,7 +213,6 @@ const plugin: AgentPlugin = {
 	manifest: { capabilities: ["hooks"] },
 	setup(_api, ctx) {
 		workspaceRoot = resolveRoot(ctx);
-		activityPath = path.join(workspaceRoot, ".vault", "activity.jsonl");
 	},
 	hooks: {
 		afterTool(context) {
@@ -190,7 +224,7 @@ const plugin: AgentPlugin = {
 						return;
 					}
 					const { output, exitCode } = extractResult(context.result);
-					appendLine({ kind: "COMMAND", command, exitCode, output, files: [] });
+					report({ kind: "COMMAND", command, exitCode, output, files: [] });
 					return;
 				}
 				if (EDIT_TOOL_NAMES.has(toolName)) {
@@ -198,7 +232,7 @@ const plugin: AgentPlugin = {
 					if (!filePath) {
 						return;
 					}
-					appendLine({
+					report({
 						kind: "EDIT",
 						command: "edited " + filePath,
 						exitCode: 0,

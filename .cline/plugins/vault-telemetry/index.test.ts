@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractCommand, extractFilePath, extractResult, lastLines, buildLine } from "./index.js";
+import { extractCommand, extractFilePath, extractResult, lastLines, buildPayload } from "./index.js";
 
 test("extractCommand: run_commands array input is joined", () => {
 	assert.equal(
@@ -102,49 +102,42 @@ test("lastLines: short text unchanged", () => {
 	assert.equal(lastLines("a\nb", 40), "a\nb");
 });
 
-test("buildLine: exact Vault JSON line shape", () => {
-	const line = buildLine(
-		{ kind: "COMMAND", command: "go test ./...", exitCode: 1, output: "line1\nline2", files: [] },
-		new Date("2026-10-04T12:00:00.000Z"),
+test("buildPayload: COMMAND shape with 40-line stderr truncation", () => {
+	const big = Array.from({ length: 100 }, (_, i) => `L${i}`).join("\n");
+	const payload = buildPayload(
+		{ kind: "COMMAND", command: "go test ./...", exitCode: 1, output: big, files: [] },
 		"/home/vivek/proj",
 	);
-	const parsed = JSON.parse(line);
-	assert.equal(parsed.time, "2026-10-04T12:00:00.000Z");
+	const parsed = JSON.parse(payload);
 	assert.equal(parsed.kind, "COMMAND");
 	assert.equal(parsed.command, "go test ./...");
 	assert.equal(parsed.exit_code, 1);
-	assert.equal(parsed.stderr, "line1\nline2");
-	assert.deepEqual(parsed.files, []);
-	assert.equal(parsed.workspace, "/home/vivek/proj");
-	assert.ok(line.endsWith("\n"));
-});
-
-test("buildLine: stderr truncated to the last 40 lines", () => {
-	const big = Array.from({ length: 100 }, (_, i) => `L${i}`).join("\n");
-	const line = buildLine(
-		{ kind: "COMMAND", command: "x", exitCode: 0, output: big, files: [] },
-		new Date("2026-10-04T12:00:00.000Z"),
-		"/ws",
-	);
-	const parsed = JSON.parse(line);
 	assert.equal(parsed.stderr.split("\n").length, 40);
 	assert.ok(parsed.stderr.startsWith("L60"));
 	assert.ok(parsed.stderr.endsWith("L99"));
+	assert.deepEqual(parsed.files, []);
+	assert.equal(parsed.workspace, "/home/vivek/proj");
 });
 
-test("buildLine: EDIT kind line shape", () => {
-	const line = buildLine(
-		{ kind: "EDIT", command: "edited /home/vivek/proj/pkg/calc.go", exitCode: 0, output: "", files: ["/home/vivek/proj/pkg/calc.go"] },
-		new Date("2026-10-04T12:00:00.000Z"),
-		"/home/vivek/proj",
+test("buildPayload: EDIT shape", () => {
+	const payload = buildPayload(
+		{ kind: "EDIT", command: "edited /p/a.go", exitCode: 0, output: "", files: ["/p/a.go"] },
+		"/ws",
 	);
-	const parsed = JSON.parse(line);
-	assert.equal(parsed.time, "2026-10-04T12:00:00.000Z");
+	const parsed = JSON.parse(payload);
 	assert.equal(parsed.kind, "EDIT");
-	assert.equal(parsed.command, "edited /home/vivek/proj/pkg/calc.go");
+	assert.equal(parsed.command, "edited /p/a.go");
 	assert.equal(parsed.exit_code, 0);
 	assert.equal(parsed.stderr, "");
-	assert.deepEqual(parsed.files, ["/home/vivek/proj/pkg/calc.go"]);
-	assert.equal(parsed.workspace, "/home/vivek/proj");
-	assert.ok(line.endsWith("\n"));
+	assert.deepEqual(parsed.files, ["/p/a.go"]);
+	assert.equal(parsed.workspace, "/ws");
+});
+
+test("buildPayload: short stderr kept intact", () => {
+	const payload = buildPayload(
+		{ kind: "COMMAND", command: "echo hi", exitCode: 0, output: "hi\n", files: [] },
+		"/ws",
+	);
+	const parsed = JSON.parse(payload);
+	assert.equal(parsed.stderr, "hi\n");
 });

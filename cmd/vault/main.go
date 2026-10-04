@@ -7,6 +7,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -21,9 +22,15 @@ func main() {
 	log.SetOutput(os.Stderr)
 	log.SetFlags(0)
 
-	if len(os.Args) > 1 && os.Args[1] == "health" {
-		runHealth(os.Args[2:])
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "health":
+			runHealth(os.Args[2:])
+			return
+		case "report":
+			runReport(os.Args[2:])
+			return
+		}
 	}
 
 	srv := mcp.NewServer(os.Stdin, os.Stdout, resolveRoot())
@@ -44,22 +51,53 @@ func runHealth(args []string) {
 		os.Exit(2)
 	}
 
-	r := *root
-	if r == "" {
-		r = resolveRoot()
-	}
-	abs, err := filepath.Abs(r)
-	if err != nil {
-		abs = r
-	}
-
-	st := state.New(abs)
+	st := state.New(absRoot(*root))
 	out, err := st.HealthJSON(*workspace)
 	if err != nil {
 		log.Printf("vault health: %v", err)
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stdout, out)
+}
+
+// runReport implements `vault report [--root DIR] '<json-args>'`: it feeds the
+// JSON arguments payload to report_activity (which takes the git snapshot and
+// appends the activity line) and prints the tool result. The telemetry plugin
+// uses this subcommand so every activity goes through the Go server instead of
+// direct file writes.
+func runReport(args []string) {
+	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	fs.SetOutput(os.Stderr)
+	root := fs.String("root", "", "vault root (default VAULT_ROOT or cwd)")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+	if fs.NArg() < 1 {
+		log.Printf("vault report: missing JSON arguments payload")
+		os.Exit(2)
+	}
+
+	payload := fs.Arg(0)
+	st := state.New(absRoot(*root))
+	text, isErr := st.DispatchTool("report_activity", json.RawMessage(payload))
+	fmt.Fprintln(os.Stdout, text)
+	if isErr {
+		os.Exit(1)
+	}
+}
+
+// absRoot returns the absolute vault root for a CLI subcommand: the --root
+// flag when given, else VAULT_ROOT, else the working directory.
+func absRoot(flagRoot string) string {
+	r := flagRoot
+	if r == "" {
+		r = resolveRoot()
+	}
+	abs, err := filepath.Abs(r)
+	if err != nil {
+		return r
+	}
+	return abs
 }
 
 // resolveRoot returns VAULT_ROOT (made absolute) or the working directory.
