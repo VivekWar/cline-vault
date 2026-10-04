@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 
 	"vault/internal/mcp"
+	"vault/internal/report"
 	"vault/internal/state"
 )
 
@@ -60,11 +61,15 @@ func runHealth(args []string) {
 	fmt.Fprintln(os.Stdout, out)
 }
 
-// runReport implements `vault report [--root DIR] '<json-args>'`: it feeds the
-// JSON arguments payload to report_activity (which takes the git snapshot and
-// appends the activity line) and prints the tool result. The telemetry plugin
-// uses this subcommand so every activity goes through the Go server instead of
-// direct file writes.
+// runReport implements the `vault report` subcommand with two forms:
+//
+//   - `vault report [--root DIR]` (no positional argument) generates the
+//     self-contained HTML report at <root>/.vault/report.html (Feature C).
+//   - `vault report [--root DIR] '<json-args>'` feeds the JSON arguments
+//     payload to report_activity (which takes the git snapshot and appends
+//     the activity line) and prints the tool result. The telemetry plugin
+//     uses this form so every activity goes through the Go server instead of
+//     direct file writes.
 func runReport(args []string) {
 	fs := flag.NewFlagSet("report", flag.ExitOnError)
 	fs.SetOutput(os.Stderr)
@@ -72,9 +77,9 @@ func runReport(args []string) {
 	if err := fs.Parse(args); err != nil {
 		os.Exit(2)
 	}
-	if fs.NArg() < 1 {
-		log.Printf("vault report: missing JSON arguments payload")
-		os.Exit(2)
+	if fs.NArg() == 0 {
+		runReportHTML(*root)
+		return
 	}
 
 	payload := fs.Arg(0)
@@ -84,6 +89,17 @@ func runReport(args []string) {
 	if isErr {
 		os.Exit(1)
 	}
+}
+
+// runReportHTML implements `vault report` with no payload: it generates
+// <root>/.vault/report.html and prints the path written.
+func runReportHTML(root string) {
+	path, err := report.Generate(absRoot(root))
+	if err != nil {
+		log.Printf("vault report: %v", err)
+		os.Exit(1)
+	}
+	fmt.Fprintln(os.Stdout, "wrote "+path)
 }
 
 // absRoot returns the absolute vault root for a CLI subcommand: the --root

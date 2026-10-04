@@ -165,3 +165,53 @@ func TestReportCLI(t *testing.T) {
 		}
 	})
 }
+
+// TestReportHTMLCLI builds the binary, seeds activity through the telemetry
+// form of `vault report '<json>'`, then runs the bare form and asserts it
+// writes a self-contained .vault/report.html.
+func TestReportHTMLCLI(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "vault")
+	modRoot := findModuleRoot(t)
+	build := exec.Command("go", "build", "-o", bin, "./cmd/vault")
+	build.Dir = modRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+
+	root := t.TempDir()
+	fail := `{"kind":"TEST","command":"go test","exit_code":1,` +
+		`"stderr":"assertion mismatch: expected true but got false in calc_test.go","files":["calc_test.go"]}`
+	for i := 0; i < 3; i++ {
+		proc := exec.Command(bin, "report", "--root", root, fail)
+		var stdout, stderr bytes.Buffer
+		proc.Stdout = &stdout
+		proc.Stderr = &stderr
+		if err := proc.Run(); err != nil {
+			t.Fatalf("seeding report failed: %v\nstderr: %s", err, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "recorded #") {
+			t.Fatalf("seed stdout = %q, want 'recorded #N'", stdout.String())
+		}
+	}
+
+	proc := exec.Command(bin, "report", "--root", root)
+	var stdout, stderr bytes.Buffer
+	proc.Stdout = &stdout
+	proc.Stderr = &stderr
+	if err := proc.Run(); err != nil {
+		t.Fatalf("vault report (html) exited with error: %v\nstderr: %s", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "wrote "+filepath.Join(root, ".vault", "report.html")) {
+		t.Errorf("stdout = %q, want 'wrote <path>'", stdout.String())
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".vault", "report.html"))
+	if err != nil {
+		t.Fatalf("read report.html: %v", err)
+	}
+	html := string(data)
+	for _, want := range []string{"<!DOCTYPE html>", "RECURRING_ERROR_LOOP", "Total actions taken"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("report.html missing %q", want)
+		}
+	}
+}
