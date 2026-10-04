@@ -76,6 +76,37 @@ Phase 4c replaces the static-report UX with a true real-time web dashboard:
   stays `:8080`) so tests and users can bind an ephemeral port without
   touching the code; behavior otherwise matches the spec's
   `http.ListenAndServe(":8080", nil)` shape (DefaultServeMux + nil handler).
+## Amendment — 4c.1 UI fix (post-feedback)
+
+User feedback: "UI feels really broken and is not interactive and really
+bad." Root causes addressed:
+
+1. **Single point of failure:** HTMX was loaded from unpkg. It is now
+   vendored (go:embed `internal/report/htmx.min.js`, 48 KB) and served
+   locally at `/htmx.min.js` via `report.HTMXHandler` — the dashboard is
+   now fully self-contained and works offline. (Deviation: the spec's unpkg
+   script tag was replaced with the local one.)
+2. **No interactivity:** added clickable kind filter chips over Recent
+   Activity (All/COMMAND/TEST/EDIT/READ/COMMIT) with live per-kind counts;
+   `?kind=` server-side filtering; JS-driven polling (via `htmx.ajax`, with
+   a plain `fetch` fallback) so the filter sticks across the 1s updates.
+   The served HTML keeps the exact spec attributes (`hx-get`, `hx-trigger`,
+   `hx-swap`); the inline JS removes `hx-trigger` at runtime so native
+   polling cannot overwrite a filtered view.
+3. **Janky constant re-animation:** removed the per-swap `growbar` keyframe
+   (bars re-grew from 0 every second). Updates now use a subtle fragment
+   fade-in (`fadeIn 0.28s`); `transition: width 0.3s ease` remains on the
+   bars per spec.
+4. **Dead-looking widgets:** churn shows a friendly empty state when
+   net/gross are 0; a live "Updated HH:MM:SS UTC" stamp proves liveness;
+   kind pills, row hover, card shadows, and a red flag dot polish the
+   visuals.
+
+Evidence: `make verify` green (updated `TestDashboardHandler`,
+`TestServeCLI`, new `TestContentKindFilter`, `TestHTMXHandler`); live
+server on :8080 verified with curl (chips with counts, `?kind=COMMAND`
+returns 6 rows, `/htmx.min.js` serves JS).
+
 ## Deviations from the prompt
 
 - `vault report` (bare form) was retained alongside `vault serve`: the

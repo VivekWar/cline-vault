@@ -11,6 +11,7 @@ package report
 
 import (
 	"bytes"
+	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,9 +20,16 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"vault/internal/heuristics"
 )
+
+// htmxJS is HTMX 1.9.12, vendored so the dashboard works without any CDN
+// dependency (the original unpkg reference was a single point of failure).
+//
+//go:embed htmx.min.js
+var htmxJS []byte
 
 // activityLine mirrors one JSON line of .vault/activity.jsonl.
 type activityLine struct {
@@ -48,6 +56,7 @@ type churnView struct {
 	Efficiency float64
 	NetPct     int
 	GrossPct   int
+	HasChurn   bool
 }
 
 // loopView summarizes the recurring error loop, when one was detected.
@@ -65,6 +74,12 @@ type rowView struct {
 	ExitCode int
 }
 
+// kindCount is the per-kind activity tally shown on the filter chips.
+type kindCount struct {
+	Kind  string
+	Count int
+}
+
 // pageData is the template data for every view.
 type pageData struct {
 	Total    int
@@ -76,8 +91,14 @@ type pageData struct {
 	Churn    churnView
 	Loop     loopView
 	Recent   []rowView
+	Kinds    []kindCount
+	Filter   string
+	Now      string
 	HasFlags bool
 }
+
+// kindOrder is the fixed chip order (All is implicit).
+var kindOrder = []string{"COMMAND", "TEST", "EDIT", "READ", "COMMIT"}
 
 // Generate reads root/.vault/activity.jsonl and writes a self-contained
 // .vault/report.html snapshot (inline CSS, no external assets — a plain
@@ -85,7 +106,7 @@ type pageData struct {
 // It returns the absolute path written. A missing activity log yields an
 // empty report.
 func Generate(root string) (string, error) {
-	data, err := collect(root)
+	data, err := collect(root, "all")
 	if err != nil {
 		return "", err
 	}
@@ -109,21 +130,33 @@ func Generate(root string) (string, error) {
 // pre-filled with the current content so the first paint is instant.
 func DashboardHandler(root string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		renderTemplate(w, root, "dashboard")
+		renderTemplate(w, root, "dashboard", "all")
 	}
 }
 
 // ContentHandler serves ONLY the inner content fragment for "/content" —
 // the stats, flags, churn bars and tables that HTMX swaps in every second.
+// The ?kind= query parameter filters the Recent Activity table (any of the
+// five activity kinds; anything else means "all").
 func ContentHandler(root string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		renderTemplate(w, root, "content")
+		kind := r.URL.Query().Get("kind")
+		renderTemplate(w, root, "content", kind)
+	}
+}
+
+// HTMXHandler serves the vendored HTMX 1.9.12 script from /htmx.min.js, so
+// the dashboard has no external CDN dependency.
+func HTMXHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
+		w.Write(htmxJS)
 	}
 }
 
 // renderTemplate collects fresh data and executes the named template.
-func renderTemplate(w http.ResponseWriter, root, name string) {
-	data, err := collect(root)
+func renderTemplate(w http.ResponseWriter, root, name, kind string) {
+	data, err := collect(root, kind)
 	if err != nil {
 		http.Error(w, "vault: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -134,8 +167,9 @@ func renderTemplate(w http.ResponseWriter, root, name string) {
 	}
 }
 
-// collect reads the activity log and aggregates it into pageData.
-func collect(root string) (pageData, error) {
+// collect reads the activity log and aggregates it into pageData, filtering
+// the recent-activity table by kind ("all" or a specific kind).
+func collect(root, kind string) (pageData, error) {
 	acts, err := readActivities(filepath.Join(root, ".vault", "activity.jsonl"))
 	if err != nil {
 		return pageData{}, err
@@ -157,7 +191,7 @@ func collect(root string) (pageData, error) {
 		}
 	}
 	health := heuristics.Assess(root, entries, trees)
-	return buildPage(acts, health, failing), nil
+	return buildPage(acts, health, failing, kind), nil
 }
 
 // readActivities parses activity.jsonl, skipping unparseable lines and
@@ -184,8 +218,9 @@ func readActivities(path string) ([]activityLine, error) {
 	return out, nil
 }
 
-// buildPage converts activities and the health assessment into template data.
-func buildPage(acts []activityLine, health heuristics.Health, failing int) pageData {
+// buildPage converts activities and the health assessment into template
+// data. kind filters the recent-activity table ("all" or a specific kind).
+func buildPage(acts []activityLine, health heuristics.Health, failing int, kind string) pageData {
 	data := pageData{
 		Total:   len(acts),
 		Failing: failing,
@@ -197,8 +232,16 @@ func buildPage(acts []activityLine, health heuristics.Health, failing int) pageD
 			Net:        health.Metrics.Net,
 			Gross:      health.Metrics.Gross,
 			Efficiency: health.Metrics.Efficiency,
+			HasChurn:   health.Metrics.Net > 0 || health.Metrics.Gross > 0,
 		},
 		Recent: make([]rowView, 0, len(acts)),
+		Kinds:  make([]kindCount, 0, len(kindOrder)),
+		Filter: kind,
+		Now:    time.Now().UTC().Format("15:04:05"),
+	}
+	if kind != "all" && !validKind(kind) {
+		kind = "all"
+		data.Filter = "all"
 	}
 	for _, f := range health.Flags {
 		ev, err := json.Marshal(f.Evidence)
@@ -229,21 +272,53 @@ func buildPage(acts []activityLine, health heuristics.Health, failing int) pageD
 		data.Churn.GrossPct = int(data.Churn.Gross / max * 100)
 	}
 
+	// Per-kind tallies for the filter chips, in fixed order.
+	counts := map[string]int{}
+	for _, a := range acts {
+		counts[a.Kind]++
+	}
+	for _, k := range kindOrder {
+		if counts[k] > 0 {
+			data.Kinds = append(data.Kinds, kindCount{Kind: k, Count: counts[k]})
+		}
+	}
+
 	// Recent activity table: newest last is confusing for readers, so show
-	// the most recent rows (capped) with commands redacted.
+	// the most recent rows (capped) with commands redacted, filtered by kind.
 	start := 0
 	if len(acts) > 20 {
 		start = len(acts) - 20
 	}
 	for _, a := range acts[start:] {
+		if kind != "all" && a.Kind != kind {
+			continue
+		}
 		data.Recent = append(data.Recent, rowView{
-			Time:     a.Time,
+			Time:     shortTime(a.Time),
 			Kind:     a.Kind,
 			Command:  heuristics.Redact(a.Command),
 			ExitCode: a.ExitCode,
 		})
 	}
 	return data
+}
+
+// validKind reports whether k is one of the five activity kinds.
+func validKind(k string) bool {
+	for _, v := range kindOrder {
+		if v == k {
+			return true
+		}
+	}
+	return false
+}
+
+// shortTime trims an RFC3339 timestamp to HH:MM:SS for the table.
+func shortTime(t string) string {
+	if len(t) >= 19 {
+		return t[11:19]
+	}
+	return t
 }
 
 // tpls holds the named templates: css (shared styles), content (the inner
@@ -291,7 +366,7 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px; }
 .stat .label { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
 .stat .value { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
-.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px 26px; margin-bottom: 16px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 24px 26px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(17,24,39,0.04); }
 .card h2 { margin: 0 0 18px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 500; line-height: 1.5; }
 .badge-healthy { background: #ecfdf5; color: var(--green); border: 1px solid #d1fae5; }
@@ -300,22 +375,33 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .badge-muted { background: #f4f4f5; color: var(--muted); border: 1px solid var(--border); }
 .flag { border: 1px solid var(--border); border-left: 3px solid var(--red); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; background: var(--card); }
 .flag .name { font-weight: 600; font-size: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.flag-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; }
+.flag .name span:last-child { flex: 1; }
 .flag pre { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 8px 0 0; overflow-x: auto; }
 .bar-row { margin-bottom: 16px; }
 .bar-meta { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
 .bar-meta .val { font-family: var(--mono); font-size: 12.5px; color: var(--muted); }
 .bar-track { background: #f4f4f5; border-radius: 999px; height: 10px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 999px; transition: width 0.3s ease; animation: growbar 0.4s ease-out; }
+.bar-fill { height: 100%; border-radius: 999px; transition: width 0.3s ease; }
 .bar-net { background: var(--accent); }
 .bar-gross { background: #a78bfa; }
-@keyframes growbar { from { width: 0; } }
+.fragment { animation: fadeIn 0.28s ease-out; }
+@keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+tr:hover td { background: #fafafa; }
 th { text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding: 8px 10px; border-bottom: 1px solid var(--border); }
 td { padding: 9px 10px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; vertical-align: top; }
 tr:last-child td { border-bottom: none; }
 .mono { font-family: var(--mono); font-size: 12.5px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-.chip { font-family: var(--mono); font-size: 11.5px; background: #f4f4f5; border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; color: var(--muted); }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.chip { font-family: var(--mono); font-size: 11.5px; background: #f4f4f5; border: 1px solid var(--border); border-radius: 999px; padding: 4px 12px; color: var(--muted); cursor: pointer; user-select: none; transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease; }
+.chip:hover { background: #ececee; }
+.chip.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.tokens .chip { cursor: default; }
+.chip em { font-style: normal; opacity: 0.65; margin-left: 5px; }
+.chip.active em { opacity: 0.85; }
+.kind-pill { display: inline-block; font-family: var(--mono); font-size: 11px; background: #f4f4f5; border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px; color: var(--muted); white-space: nowrap; }
+.updated { margin-top: 20px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
 .muted { color: var(--muted); }
 .empty { color: var(--muted); font-size: 13px; }
 .exit-ok { color: var(--green); font-weight: 600; }
@@ -328,6 +414,7 @@ tr:last-child td { border-bottom: none; }
 // contentHTML is the inner fragment served at /content and embedded in both
 // the dashboard shell and the static snapshot.
 const contentHTML = `
+<div class="fragment">
 <div class="stats">
   <div class="stat"><div class="label">Total actions taken</div><div class="value">{{.Total}}</div></div>
   <div class="stat"><div class="label">Failing actions</div><div class="value">{{.Failing}}</div></div>
@@ -339,7 +426,7 @@ const contentHTML = `
   <h2>Flags Triggered</h2>
   {{if .HasFlags}}
   {{range .Flags}}<div class="flag">
-    <div class="name"><span>{{.Name}}</span><span class="badge badge-critical">flag</span></div>
+    <div class="name"><span class="flag-dot"></span><span>{{.Name}}</span></div>
     <pre>{{.Evidence}}</pre>
   </div>{{end}}
   {{else}}<p class="empty">No flags triggered. Context looks healthy.</p>{{end}}
@@ -347,6 +434,7 @@ const contentHTML = `
 
 <div class="card">
   <h2>Churn: Net vs Gross</h2>
+  {{if .Churn.HasChurn}}
   <div class="bar-row">
     <div class="bar-meta"><span>Net</span><span class="val">{{printf "%.1f" .Churn.Net}}</span></div>
     <div class="bar-track"><div class="bar-fill bar-net" style="width:{{.Churn.NetPct}}%"></div></div>
@@ -356,6 +444,7 @@ const contentHTML = `
     <div class="bar-track"><div class="bar-fill bar-gross" style="width:{{.Churn.GrossPct}}%"></div></div>
   </div>
   <p class="muted" style="font-size:12.5px; margin:0">Efficiency (net/gross): <span class="mono">{{printf "%.2f" .Churn.Efficiency}}</span></p>
+  {{else}}<p class="empty">No churn recorded yet — code edits will animate the net vs gross bars here.</p>{{end}}
 </div>
 
 <div class="card">
@@ -365,17 +454,24 @@ const contentHTML = `
     <tr><th>Pairwise similarity</th><th>Value</th></tr>
     {{range .Loop.Similarities}}<tr><td>Jaccard similarity</td><td class="mono">{{printf "%.2f" .}}</td></tr>{{end}}
   </table>
-  {{if .Loop.SharedTokens}}<div class="chips">{{range .Loop.SharedTokens}}<span class="chip">{{.}}</span>{{end}}</div>{{end}}
+  {{if .Loop.SharedTokens}}<div class="chips tokens">{{range .Loop.SharedTokens}}<span class="chip">{{.}}</span>{{end}}</div>{{end}}
   {{else}}<p class="empty">No recurring error loop detected.</p>{{end}}
 </div>
 
 <div class="card">
   <h2>Recent Activity</h2>
+  <div class="chips">
+    <span class="chip{{if eq .Filter "all"}} active{{end}}" data-kind="all">All<em>{{.Total}}</em></span>
+    {{range .Kinds}}<span class="chip{{if eq $.Filter .Kind}} active{{end}}" data-kind="{{.Kind}}">{{.Kind}}<em>{{.Count}}</em></span>{{end}}
+  </div>
   <table>
     <tr><th>Time</th><th>Kind</th><th>Command</th><th>Exit</th></tr>
-    {{range .Recent}}<tr><td class="muted">{{.Time}}</td><td>{{.Kind}}</td><td class="mono">{{.Command}}</td><td class="{{if eq .ExitCode 0}}exit-ok{{else}}exit-bad{{end}}">{{.ExitCode}}</td></tr>
+    {{range .Recent}}<tr><td class="muted">{{.Time}}</td><td><span class="kind-pill">{{.Kind}}</span></td><td class="mono">{{.Command}}</td><td class="{{if eq .ExitCode 0}}exit-ok{{else}}exit-bad{{end}}">{{.ExitCode}}</td></tr>
     {{else}}<tr><td colspan="4" class="empty">No activity recorded yet.</td></tr>{{end}}
   </table>
+</div>
+
+<div class="updated"><span>Updated {{.Now}} UTC</span><span>auto-refresh every 1s</span></div>
 </div>
 `
 
@@ -388,7 +484,7 @@ const dashboardHTML = `<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Vault — Live Dashboard</title>
-<script src="https://unpkg.com/htmx.org@1.9.12"></script>
+<script src="/htmx.min.js"></script>
 <style>{{template "css"}}</style>
 </head>
 <body>
@@ -408,6 +504,33 @@ const dashboardHTML = `<!DOCTYPE html>
     <span>VAULT</span>
   </footer>
 </div>
+<script>
+(function () {
+  var filter = "all";
+  var main = document.getElementById("main-content");
+  // The served HTML keeps hx-trigger="every 1s" for spec compatibility, but
+  // JS owns polling here so the selected kind filter sticks across updates.
+  if (main) { main.removeAttribute("hx-trigger"); }
+  function refresh() {
+    var url = "/content?kind=" + filter;
+    if (typeof htmx !== "undefined") {
+      htmx.ajax("GET", url, { target: "#main-content", swap: "innerHTML" });
+    } else {
+      fetch(url).then(function (r) { return r.text(); }).then(function (html) {
+        var el = document.getElementById("main-content");
+        if (el) { el.innerHTML = html; }
+      }).catch(function () {});
+    }
+  }
+  document.addEventListener("click", function (e) {
+    var chip = e.target.closest("[data-kind]");
+    if (!chip) { return; }
+    filter = chip.getAttribute("data-kind");
+    refresh();
+  });
+  setInterval(refresh, 1000);
+})();
+</script>
 </body>
 </html>
 `

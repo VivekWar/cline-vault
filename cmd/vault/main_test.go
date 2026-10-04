@@ -283,7 +283,7 @@ func TestServeCLI(t *testing.T) {
 
 	shell := get("/")
 	for _, want := range []string{
-		`<script src="https://unpkg.com/htmx.org@1.9.12"></script>`,
+		`<script src="/htmx.min.js"></script>`,
 		`hx-get="/content" hx-trigger="every 1s" hx-swap="innerHTML"`,
 		"Total actions taken",
 		`>1</div>`,

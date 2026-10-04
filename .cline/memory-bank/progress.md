@@ -1,5 +1,13 @@
 # Memory Bank — Progress
 
+Phase 4c.1: DONE — dashboard UI fix (user feedback: "broken, not
+interactive"): vendored HTMX 1.9.12 (go:embed, served at /htmx.min.js — no
+CDN dependency); JS-driven polling with sticky kind filter chips
+(All/COMMAND/TEST/EDIT/READ/COMMIT with live counts, ?kind= param); calm
+fade-in swap animation instead of perpetual bar re-growth; live "Updated
+HH:MM:SS UTC" stamp; kind pills, row hover, card shadows, churn empty state.
+make verify green; running live on :8080.
+
 Phase 4c: DONE — real-time dashboard: new `vault serve` HTTP server (default
 :8080, --addr overridable) with "/" shell + "/content" fragment; HTMX 1.9.12
 polls the fragment every 1s (hx-get/hx-trigger/hx-swap innerHTML); premium

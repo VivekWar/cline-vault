@@ -123,11 +123,14 @@ func TestDashboardHandler(t *testing.T) {
 	html := get(t, DashboardHandler(root), "/")
 	for _, want := range []string{
 		"<!DOCTYPE html>",
-		`<script src="https://unpkg.com/htmx.org@1.9.12"></script>`,
+		`<script src="/htmx.min.js"></script>`,
 		`<main id="main-content" hx-get="/content" hx-trigger="every 1s" hx-swap="innerHTML">`,
 		"Total actions taken",
 		"transition: width 0.3s ease",
 		"Vault — Live Dashboard",
+		`data-kind="all"`,
+		`setInterval(refresh, 1000)`,
+		`htmx.ajax("GET", url, { target: "#main-content", swap: "innerHTML" })`,
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("dashboard missing %q", want)
@@ -174,16 +177,69 @@ func TestContentLiveUpdates(t *testing.T) {
 	}
 }
 
+// TestContentKindFilter: ?kind= filters the recent-activity table and marks
+// the matching chip active, while the totals stay global.
+func TestContentKindFilter(t *testing.T) {
+	root := t.TempDir()
+	seed(t, root, strings.Join([]string{
+		`{"time":"2026-10-04T10:00:00Z","kind":"COMMAND","command":"cmd1","exit_code":0,"stderr":"","files":[],"workspace":""}`,
+		`{"time":"2026-10-04T10:00:01Z","kind":"COMMAND","command":"cmd2","exit_code":0,"stderr":"","files":[],"workspace":""}`,
+		`{"time":"2026-10-04T10:00:02Z","kind":"TEST","command":"go test","exit_code":1,"stderr":"boom","files":[],"workspace":""}`,
+	}, "\n")+"\n")
+
+	frag := get(t, ContentHandler(root), "/content?kind=COMMAND")
+	if !strings.Contains(frag, `data-kind="COMMAND">COMMAND<em>2</em>`) {
+		t.Errorf("COMMAND chip missing its count:\n%s", frag)
+	}
+	if !strings.Contains(frag, `class="chip active" data-kind="COMMAND"`) {
+		t.Errorf("COMMAND chip must be active when filtered:\n%s", frag)
+	}
+	if strings.Contains(frag, "go test") {
+		t.Errorf("TEST rows must be filtered out for kind=COMMAND:\n%s", frag)
+	}
+	if !strings.Contains(frag, "cmd1") || !strings.Contains(frag, "cmd2") {
+		t.Errorf("COMMAND rows missing:\n%s", frag)
+	}
+	if !strings.Contains(frag, ">3</div>") {
+		t.Errorf("total must stay global (3) under a filter:\n%s", frag)
+	}
+
+	// Unknown kinds fall back to "all".
+	all := get(t, ContentHandler(root), "/content?kind=BOGUS")
+	if !strings.Contains(all, "go test") || !strings.Contains(all, "cmd1") {
+		t.Errorf("unknown kind must fall back to all:\n%s", all)
+	}
+}
+
+// TestHTMXHandler: /htmx.min.js serves the vendored HTMX script locally.
+func TestHTMXHandler(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/htmx.min.js", nil)
+	HTMXHandler()(rec, req)
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/javascript") {
+		t.Errorf("content-type = %q, want application/javascript", ct)
+	}
+	if !strings.Contains(rec.Body.String(), "htmx") {
+		t.Errorf("served file does not look like htmx (%d bytes)", rec.Body.Len())
+	}
+}
+
 // TestBuildPageChurnBars: net/gross bar widths are percentages of the larger
 // value and stay 0 when both are 0.
 func TestBuildPageChurnBars(t *testing.T) {
-	data := buildPage(nil, healthWithChurn(30, 60), 0)
+	data := buildPage(nil, healthWithChurn(30, 60), 0, "all")
 	if data.Churn.NetPct != 50 || data.Churn.GrossPct != 100 {
 		t.Errorf("bars = %d/%d, want 50/100", data.Churn.NetPct, data.Churn.GrossPct)
 	}
-	zero := buildPage(nil, healthWithChurn(0, 0), 0)
+	if !data.Churn.HasChurn {
+		t.Error("HasChurn must be true when churn is non-zero")
+	}
+	zero := buildPage(nil, healthWithChurn(0, 0), 0, "all")
 	if zero.Churn.NetPct != 0 || zero.Churn.GrossPct != 0 {
 		t.Errorf("zero churn bars = %d/%d, want 0/0", zero.Churn.NetPct, zero.Churn.GrossPct)
+	}
+	if zero.Churn.HasChurn {
+		t.Error("HasChurn must be false when churn is zero")
 	}
 }
 
@@ -196,7 +252,7 @@ func TestBuildPageRedactsCommands(t *testing.T) {
 		Command:  "export API_KEY=sk-abcdefghijklmnopqrstuvwxyz",
 		ExitCode: 0,
 	}}
-	data := buildPage(acts, healthWithChurn(0, 0), 0)
+	data := buildPage(acts, healthWithChurn(0, 0), 0, "all")
 	if len(data.Recent) != 1 {
 		t.Fatalf("recent rows = %d, want 1", len(data.Recent))
 	}

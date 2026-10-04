@@ -122,6 +122,7 @@ func runServe(args []string) {
 	r := absRoot(*root)
 	http.HandleFunc("/", report.DashboardHandler(r))
 	http.HandleFunc("/content", report.ContentHandler(r))
+	http.HandleFunc("/htmx.min.js", report.HTMXHandler())
 	log.Printf("vault serve: dashboard at http://localhost%s (root %s)", *addr, r)
 	if err := http.ListenAndServe(*addr, nil); err != nil {
 		log.Printf("vault serve: %v", err)
