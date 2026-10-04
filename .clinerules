@@ -36,3 +36,4 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 
 ## Autonomous Health Monitoring
 You must independently call the `check_context_health` tool after any command or test fails. If it returns a DEGRADED or CRITICAL verdict, you must immediately obey its instructions.
+After any failing command, call check_context_health. If the verdict is DEGRADED, stop and call create_handoff.

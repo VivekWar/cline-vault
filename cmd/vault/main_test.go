@@ -3,15 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // TestEndToEnd builds the real binary into t.TempDir() (make verify runs
@@ -168,149 +164,14 @@ func TestReportCLI(t *testing.T) {
 			t.Fatal("want non-zero exit for invalid kind")
 		}
 	})
-}
 
-// TestReportHTMLCLI builds the binary, seeds activity through the telemetry
-// form of `vault report '<json>'`, then runs the bare form and asserts it
-// writes a self-contained .vault/report.html.
-func TestReportHTMLCLI(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "vault")
-	modRoot := findModuleRoot(t)
-	build := exec.Command("go", "build", "-o", bin, "./cmd/vault")
-	build.Dir = modRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build failed: %v\n%s", err, out)
-	}
-
-	root := t.TempDir()
-	fail := `{"kind":"TEST","command":"go test","exit_code":1,` +
-		`"stderr":"assertion mismatch: expected true but got false in calc_test.go","files":["calc_test.go"]}`
-	for i := 0; i < 3; i++ {
-		proc := exec.Command(bin, "report", "--root", root, fail)
-		var stdout, stderr bytes.Buffer
-		proc.Stdout = &stdout
+	// The bare form (no payload) must fail loudly, not generate anything.
+	t.Run("missing payload exits non-zero", func(t *testing.T) {
+		proc := exec.Command(bin, "report", "--root", t.TempDir())
+		var stderr bytes.Buffer
 		proc.Stderr = &stderr
-		if err := proc.Run(); err != nil {
-			t.Fatalf("seeding report failed: %v\nstderr: %s", err, stderr.String())
+		if err := proc.Run(); err == nil {
+			t.Fatal("want non-zero exit for missing payload")
 		}
-		if !strings.Contains(stdout.String(), "recorded #") {
-			t.Fatalf("seed stdout = %q, want 'recorded #N'", stdout.String())
-		}
-	}
-
-	proc := exec.Command(bin, "report", "--root", root)
-	var stdout, stderr bytes.Buffer
-	proc.Stdout = &stdout
-	proc.Stderr = &stderr
-	if err := proc.Run(); err != nil {
-		t.Fatalf("vault report (html) exited with error: %v\nstderr: %s", err, stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "wrote "+filepath.Join(root, ".vault", "report.html")) {
-		t.Errorf("stdout = %q, want 'wrote <path>'", stdout.String())
-	}
-	data, err := os.ReadFile(filepath.Join(root, ".vault", "report.html"))
-	if err != nil {
-		t.Fatalf("read report.html: %v", err)
-	}
-	html := string(data)
-	for _, want := range []string{"<!DOCTYPE html>", "RECURRING_ERROR_LOOP", "Total actions taken"} {
-		if !strings.Contains(html, want) {
-			t.Errorf("report.html missing %q", want)
-		}
-	}
-}
-
-// TestServeCLI builds the binary, starts `vault serve` on a free port, and
-// asserts the live dashboard: "/" returns the shell with the HTMX script and
-// polling div, "/content" returns only the inner fragment, and new activity
-// appears on the next /content fetch without restarting the server.
-func TestServeCLI(t *testing.T) {
-	bin := filepath.Join(t.TempDir(), "vault")
-	modRoot := findModuleRoot(t)
-	build := exec.Command("go", "build", "-o", bin, "./cmd/vault")
-	build.Dir = modRoot
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build failed: %v\n%s", err, out)
-	}
-
-	// Pick a free port by binding and releasing 127.0.0.1:0.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	ln.Close()
-
-	root := t.TempDir()
-	seed := exec.Command(bin, "report", "--root", root,
-		`{"kind":"TEST","command":"go test","exit_code":1,"stderr":"assertion mismatch: expected true but got false","files":["calc_test.go"]}`)
-	if out, err := seed.CombinedOutput(); err != nil {
-		t.Fatalf("seed failed: %v\n%s", err, out)
-	}
-
-	proc := exec.Command(bin, "serve", "--root", root, "--addr", addr)
-	proc.Stderr = &bytes.Buffer{}
-	if err := proc.Start(); err != nil {
-		t.Fatalf("start vault serve: %v", err)
-	}
-	defer func() {
-		proc.Process.Kill()
-		proc.Wait()
-	}()
-
-	base := "http://" + addr
-	get := func(path string) string {
-		t.Helper()
-		client := &http.Client{Timeout: 2 * time.Second}
-		var body string
-		for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); {
-			resp, err := client.Get(base + path)
-			if err == nil {
-				defer resp.Body.Close()
-				b, rerr := io.ReadAll(resp.Body)
-				if rerr == nil {
-					body = string(b)
-					break
-				}
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if body == "" {
-			t.Fatalf("GET %s: server never became ready", path)
-		}
-		return body
-	}
-
-	shell := get("/")
-	for _, want := range []string{
-		`<script src="https://unpkg.com/htmx.org@1.9.12"></script>`,
-		`hx-get="/content" hx-trigger="every 1s" hx-swap="innerHTML"`,
-		"Total actions taken",
-		`>1</div>`,
-	} {
-		if !strings.Contains(shell, want) {
-			t.Errorf("dashboard shell missing %q", want)
-		}
-	}
-
-	frag := get("/content")
-	if !strings.Contains(frag, `>1</div>`) {
-		t.Errorf("/content total != 1:\n%s", frag)
-	}
-	for _, forbidden := range []string{"<!DOCTYPE", "<script", "<style"} {
-		if strings.Contains(frag, forbidden) {
-			t.Errorf("/content must be an inner fragment only, found %q", forbidden)
-		}
-	}
-
-	// Live update: record a new activity while the server runs.
-	seed2 := exec.Command(bin, "report", "--root", root,
-		`{"kind":"COMMAND","command":"make verify","exit_code":0,"stderr":"","files":[]}`)
-	if out, err := seed2.CombinedOutput(); err != nil {
-		t.Fatalf("seed2 failed: %v\n%s", err, out)
-	}
-	frag2 := get("/content")
-	if !strings.Contains(frag2, `>2</div>`) {
-		t.Errorf("/content total != 2 after live append (real-time update failed):\n%s", frag2)
-	}
+	})
 }

@@ -1,5 +1,15 @@
 # Memory Bank — Progress
 
+Phase 6: DONE — one-command install + README + push: `make install`
+(scripts/install.sh) verifies Go 1.21+/git, builds bin/vault, registers the
+vault MCP server idempotently (Go `mcp-register` subcommand, backup +
+preserve other servers, Linux/macOS path detection), npm ci when node
+exists, .clinerules context-health hook, `bin/vault health` smoke test.
+`make uninstall` removes only the MCP entry. README.md written (9 sections,
+no vault serve — removed per user). Installer verified against temp HOME;
+make verify green; merged into main (non-ff, progress.md conflict resolved)
+and pushed to origin with tags.
+
 Phase 5: DONE — demo trap: new standalone module `demo-trap/` (its own
 go.mod) with a realistic in-memory TTL session store whose map is never
 locked (concurrent map read/write). `go test .` fatals 10/10 runs; layered
@@ -8,6 +18,15 @@ a held lock deadlocks, and `RLock` in the mutating `Get` still panics.
 Ignored via `.gitignore` (`demo-trap/`); make verify stays green. Tag
 `phase-5-done`.
 
+Phase 4 (revised): DONE — Feature Expansion: B) check_context_health returns
+a natural-language directive (VERDICT: HEALTHY/DEGRADED) before the Health
+JSON; D) pure heuristics.Redact masks sk- keys, bearer tokens, PEM private
+keys and KEY/TOKEN/SECRET/PASSWORD= pairs in activity stderr and handoff
+output; E) handoff_state.md gains a "Vault Compression Estimate" footer
+(chars/4). The HTML report (Feature C) and the real-time dashboard
+(Phase 4c/4c.1) were removed at the user's request — no web UI code remains;
+`vault report '<json>'` is telemetry-only again. make verify green.
+
 Phase 4b: DONE — pre-flight architectural & security audit: full review of
 all packages (concurrency/fd leaks, plugin spawnSync, git snapshot safety,
 heuristics math, MCP compliance, redaction ReDoS). No critical bugs; 9
@@ -15,14 +34,9 @@ findings (1 MEDIUM, 8 LOW) documented in docs/AUDIT.md with empirical
 evidence (race detector, fd stability, parallel-append integrity, 30MB-line
 RSS, adversarial redaction timing). Code left untouched for the demo lock.
 
-Phase 4: DONE — Feature Expansion: B) check_context_health returns a
-natural-language directive (VERDICT: HEALTHY/DEGRADED) before the Health
-JSON; C) new internal/report package + `vault report` (no payload) writes
-self-contained .vault/report.html (flags, churn net/gross bars, error loops);
-D) pure heuristics.Redact masks sk- keys, bearer tokens, PEM private keys and
-KEY/TOKEN/SECRET/PASSWORD= pairs in activity stderr and handoff output;
-E) handoff_state.md gains a "Vault Compression Estimate" footer (chars/4).
-make verify green; commits d1ea473..161b4c8, tag `phase-4-done`.
+Phase 4 (superseded): DONE — original Feature Expansion milestone, later
+revised to remove the web UI (Feature C report + 4c/4c.1 dashboard) per user
+request; see the "Phase 4 (revised)" entry at the top.
 
 Phase 3c: DONE — telemetry optimization & hardening: READ activities skip the
 git snapshot; DetectOscillation gained a snapshots gate (micro-oscillation,

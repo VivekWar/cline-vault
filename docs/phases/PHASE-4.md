@@ -1,186 +1,115 @@
-# Vault — Phase 4 Report
+# Vault — Phase 4 Report (revised)
 
 ## Summary
 
-Phase 4 implements the four Feature Expansion items:
+Phase 4 implemented the Feature Expansion items that remain in the
+codebase:
 
 1. **Feature B — Agent Directive.** `check_context_health`
-   (`internal/state/state.go`) now returns a natural-language directive
+   (`internal/state/state.go`) returns a natural-language directive
    followed by the Health JSON instead of raw JSON alone. Status `healthy`
    yields `VERDICT: HEALTHY. Continue working.`; `degraded` and `critical`
-   both yield `VERDICT: DEGRADED. Stop what you are doing. You are thrashing.
-   Call create_handoff immediately and ask the user to start a new task.` The
-   directive is separated from the JSON by a blank line. The `vault health`
-   CLI keeps returning raw JSON (it calls `HealthJSON`, which is unchanged).
-   The MCP tool description in `internal/mcp/tools.go` was updated to mention
-   the directive.
+   both yield `VERDICT: DEGRADED. Stop what you are doing. You are
+   thrashing. Call create_handoff immediately and ask the user to start a
+   new task.` The `vault health` CLI keeps returning raw JSON.
 
-2. **Feature C — HTML Report Command.** New package `internal/report`
-   reads `.vault/activity.jsonl`, runs the same `heuristics.Assess`
-   aggregation `check_context_health` uses, and writes a self-contained
-   `.vault/report.html` (html/template + inline CSS, zero external assets).
-   The page shows total actions, failing actions, health score/status, the
-   list of triggered flags with evidence, a Net-vs-Gross churn table plus
-   CSS bars, an error-loop table (pairwise similarities + shared tokens), and
-   a recent-activity table (commands redacted). Bare `vault report` generates
-   the report; see Deviations for how this coexists with the phase-3b
-   telemetry form.
-
-3. **Feature D — Redaction.** Pure `Redact(text string) string` in
+2. **Feature D — Redaction.** Pure `Redact(text string) string` in
    `internal/heuristics/redact.go` masks four secret classes with
-   `[REDACTED]`: `sk-` API keys (20+ alphanumerics), bearer tokens
-   (`Bearer <token>`, scheme word kept), PEM private key blocks
-   (`-----BEGIN ... PRIVATE KEY-----` … `-----END ... PRIVATE KEY-----`),
-   and `KEY=value` pairs whose key contains KEY/TOKEN/SECRET/PASSWORD
-   (case-insensitive, value only). It is applied to `stderr` in
-   `reportActivity` before the line reaches `activity.jsonl`, and to the
-   entire handoff body in `buildHandoff`. Table-driven tests plus a
-   `testdata/heuristics/redact_fixture.txt` fixture.
+   `[REDACTED]`: `sk-` API keys (20+ alphanumerics), bearer tokens, PEM
+   private key blocks, and `KEY=value` pairs whose key contains
+   KEY/TOKEN/SECRET/PASSWORD (case-insensitive, value only). Applied to
+   `stderr` in `reportActivity` before the log write and to the whole
+   handoff body in `buildHandoff`.
 
-4. **Feature E — Compression Metric.** `buildHandoff`
-   (`internal/state/handoff.go`) appends a footer to `handoff_state.md`:
-   `---` + `Vault Compression Estimate: Condensed ~X tokens of activity
-   history into ~Y tokens of handoff state. (Saved ~Z tokens).` Tokens are
-   `characters/4`. X sums the `Command` and `Stderr` characters of the
-   activity history; Y is the total characters of the final handoff string —
-   computed to a fixed point, because the footer's own length is part of Y.
-   Savings Z is clamped at 0.
+3. **Feature E — Compression Metric.** `buildHandoff` appends a footer to
+   `handoff_state.md`: `Vault Compression Estimate: Condensed ~X tokens of
+   activity history into ~Y tokens of handoff state. (Saved ~Z tokens).`
+   Tokens are characters/4; X sums Command+Stderr characters; Y is the
+   final handoff length (computed to a fixed point); savings clamped at 0.
+
+**Removed features:** Feature C (the static HTML report command) and the
+Phase 4c real-time HTMX dashboard (and its 4c.1 UI revision) were removed
+at the user's request. There is no web UI code left: the `internal/report`
+package, the `vault serve` subcommand, and the `vault report` HTML form are
+gone. `vault report '<json>'` remains, purely as the telemetry route the
+vault-telemetry plugin calls to record activity.
 
 ## Acceptance criteria
 
 | Criterion | PASS/FAIL/PARTIAL | Evidence |
 |---|---|---|
-| healthy status → `VERDICT: HEALTHY. Continue working.` + JSON | PASS | `TestCheckContextHealthHealthyDirective`; manual stdio smoke test below |
-| degraded/critical → `VERDICT: DEGRADED. Stop what you are doing…` + JSON | PASS | `TestCheckContextHealthLoopFlag` (degraded via RECURRING_ERROR_LOOP) |
-| `vault health` CLI still raw JSON | PASS | `TestHealthCLI` unchanged and passing |
-| `internal/report` generates self-contained `.vault/report.html` | PASS | `TestGenerateWithErrorLoop` (asserts no `http://`, `https://`, `<link`) |
-| Report shows total actions, flags, churn net vs gross, error loops | PASS | same test + `TestGenerateEmpty` |
-| `vault report` exists; default (no args) still stdio MCP server | PASS | `TestReportHTMLCLI`; `TestEndToEnd` (no-arg binary serves MCP) |
+| healthy status → `VERDICT: HEALTHY. Continue working.` + JSON | PASS | `TestCheckContextHealthHealthyDirective` |
+| degraded/critical → `VERDICT: DEGRADED. Stop what you are doing…` + JSON | PASS | `TestCheckContextHealthLoopFlag` |
+| `vault health` CLI still raw JSON | PASS | `TestHealthCLI` |
 | Redaction of API keys, bearer tokens, private keys, KEY=value pairs | PASS | `TestRedact` (8 cases), `TestRedactFixture` |
-| stderr redacted before reaching activity.jsonl | PASS | `TestReportActivityRedactsStderr`; manual stdio smoke test below |
+| stderr redacted before reaching activity.jsonl | PASS | `TestReportActivityRedactsStderr` |
 | handoff_state.md output redacted | PASS | `TestHandoffRedactsSecrets` |
-| Compression footer with X/Y/Z (chars/4) | PASS | `TestHandoffCompressionFooter` (2 cases), `TestCompressionFooterCountsOnlyCommandAndStderr` |
+| Compression footer with X/Y/Z (chars/4) | PASS | `TestHandoffCompressionFooter`, `TestCompressionFooterCountsOnlyCommandAndStderr` |
+| No web UI code remains (report package, serve subcommand, HTMX) | PASS | `internal/` contains only heuristics/mcp/state; `make verify` green |
+| `vault report '<json>'` telemetry route intact | PASS | `TestReportCLI`, plugin invocation path |
 | `make verify` green | PASS | output below |
 
-## Files built
+## Files (current state)
 
-- `internal/state/state.go` (236) — Feature B: verdict constants +
-  `checkContextHealth` directive; Feature D: stderr redaction in
-  `reportActivity`.
-- `internal/state/handoff.go` (318) — Feature D: handoff body redaction;
-  Feature E: `compressionFooter` + `savedTokens` appended in `buildHandoff`.
-- `internal/state/health_test.go` (119) — updated loop test for the directive;
-  new `TestCheckContextHealthHealthyDirective`; `textAfterDirective` helper.
-- `internal/state/handoff_test.go` (146) — new: `TestHandoffRedactsSecrets`,
-  `TestHandoffKeepsValidJSONArgs`, `TestHandoffCompressionFooter`,
-  `TestCompressionFooterCountsOnlyCommandAndStderr`.
-- `internal/state/state_test.go` (385) — new `TestReportActivityRedactsStderr`.
-- `internal/heuristics/redact.go` (43) — pure `Redact` + 4 compiled regexes.
-- `internal/heuristics/redact_test.go` (120) — table-driven + fixture tests.
-- `testdata/heuristics/redact_fixture.txt` (11) — fixture log with all four
-  secret classes.
-- `internal/report/report.go` (292) — `Generate`, `buildPage`, page template.
-- `internal/report/report_test.go` (130) — 5 tests.
-- `cmd/vault/main.go` (133) — `vault report` dual form dispatch +
-  `runReportHTML`.
-- `cmd/vault/main_test.go` (217) — `TestReportHTMLCLI`.
+- `internal/state/state.go` (236) — verdict constants, directive in
+  `checkContextHealth`, stderr redaction in `reportActivity`.
+- `internal/state/handoff.go` (318) — handoff redaction, compression footer.
+- `internal/state/health_test.go` (119), `handoff_test.go` (146),
+  `state_test.go` (385) — directive/redaction/footer tests.
+- `internal/heuristics/redact.go` (43) + `redact_test.go` (120) + fixture
+  `testdata/heuristics/redact_fixture.txt` (11).
+- `cmd/vault/main.go` — health + report (telemetry-only) subcommands.
+- `cmd/vault/main_test.go` — e2e, health, report CLI tests.
+- `internal/mcp/tools.go` (108) — `check_context_health` description.
+
 ## Design decisions
 
-- **Directive split with `\n\n`.** The verdict line and JSON are separated by
-  a blank line so an LLM can read the directive naturally and a machine can
-  still slice the JSON off deterministically (`textAfterDirective` in tests).
-  Rejected: putting the directive inside the JSON (changes the Health schema
-  and breaks `vault health` consumers).
-- **Verdict wording for `critical`.** The prompt gives one text for both
-  `degraded` and `critical`; both use the DEGRADED wording as specified.
-- **`vault report` dual form (see Deviations).** Because the phase-3b
-  telemetry plugin invokes `vault report --root DIR '<json>'`, the subcommand
-  dispatches on the presence of a positional argument: payload → telemetry
-  route; no payload → HTML report. This keeps the plugin working byte-for-byte
-  while honoring the phase-4 "add `vault report`" instruction.
-- **Report reuses `heuristics.Assess`.** Flags/churn in report.html are the
-  exact same numbers `check_context_health` reports — one source of truth, no
-  reimplementation. Trees come from the log's `tree` fields (no fresh git
-  snapshot), so the report is deterministic and works offline.
-- **Redaction is applied last-in-write-path.** `reportActivity` redacts
-  stderr before marshaling; `buildHandoff` redacts the fully assembled body,
-  which also covers agent-supplied sections (goal, decisions, blocker) — the
-  only ordering that guarantees secrets never reach disk even when they
-  arrive via a section that isn't `stderr`.
-- **Compression Y fixed point.** The footer reports the handoff's own length,
-  so Y iterates until `len(body) + len(footer)` is stable (converges in a
-  couple of iterations since only digit counts shift).
-- **Redaction substring matching is spec-literal.** A key like `hockey=1`
-  contains "key" and is masked; that false positive is the documented,
-  accepted cost of never leaking credentials (noted in `redact.go`).
-- **Savings clamped at 0.** Tiny sessions whose handoff is longer than the
-  activity history report `(Saved ~0 tokens)` rather than a negative number.
-
+- **Directive split with `\n\n`** so an LLM reads the verdict naturally and
+  a machine can still slice the JSON off deterministically.
+- **Redaction applied last-in-write-path** (`reportActivity` redacts stderr
+  before marshaling; `buildHandoff` redacts the assembled body) so secrets
+  never reach disk via any section.
+- **Compression Y fixed point** because the footer is part of the handoff
+  string it measures.
+- **Redaction substring matching is spec-literal** (e.g. `hockey=1` is
+  masked); accepted false-positive trade-off, documented in `redact.go`.
 ## Deviations from the prompt
 
-- **`vault report` already existed** (phase 3b telemetry route; the
-  `vault-telemetry` plugin calls `vault report --root DIR '<json-payload>'`
-  from its `afterTool` hook). It was preserved via positional-argument
-  dispatch instead of being replaced. The plugin was NOT modified.
-- **Feature D scope.** The prompt asked to apply redaction to the
-  `handoff_state.md` output; implemented as redaction of the whole handoff
-  body (covers stderr excerpts AND agent-supplied sections). Activity log
-  redaction is stderr-only as specified (Command is also redacted in the HTML
-  report's recent-activity table, beyond spec, because commands can carry
-  `KEY=value` secrets).
-- **Footer blank line.** A leading blank line is emitted before the `---`
-  footer for valid Markdown (the file body already ends with a newline).
-- **Tests were written alongside implementation, not strictly first** (same
-  practice as phases 1–3: table-driven tests land in the same commit as the
-  feature, and each commit was only made after `make verify` was green).
+- **Feature C and the Phase 4c/4c.1 dashboard were removed on user request.**
+  The original prompt asked for an HTML report command and (in 4c) a
+  real-time HTMX dashboard; both were built, then deleted in a follow-up
+  revision. The telemetry form of `vault report '<json>'` was retained
+  because the vault-telemetry plugin depends on it.
 - **Critical status shares the DEGRADED wording** — the prompt only defines
   two directive texts.
+- **Tests were written alongside implementation** (each commit only landed
+  after `make verify` was green).
 
 ## Problems encountered
 
-- **`gofmt` failures on new test files** (twice): raw-string alignment in
-  `redact_test.go` and `handoff_test.go` tables. Root cause: hand-written
-  table alignment. Fix: `gofmt -w`; no test changes needed.
-- **Unused imports after trimming a test** (`os`, `path/filepath` in
-  `handoff_test.go`): removed.
-- **Editor clobbered `var pageTmpl`** when splitting the large `report.go`
-  into two edits (the second edit replaced the line that declared `pageTmpl`,
-  leaving `pageHTML` unparsed and `html/template` unused). Fix: re-added
-  `var pageTmpl = template.Must(...)` above the const. No failed commits —
-  `make verify` caught it before commit.
+- `gofmt` alignment on new test tables; unused imports; a large-file editor
+  split that clobbered a template declaration during the (now-removed)
+  report work. All caught by `make verify` before commit.
+- No failed commits reached the branch.
+
 ## Test evidence
 
-`go test ./... -v -count=1` summary (new Phase-4 tests):
-
-```
-=== RUN   TestReportHTMLCLI                     --- PASS
-=== RUN   TestGenerateWithErrorLoop             --- PASS
-=== RUN   TestGenerateEmpty                     --- PASS
-=== RUN   TestBuildPageChurnBars                --- PASS
-=== RUN   TestBuildPageRedactsCommands          --- PASS
-=== RUN   TestRedact (8 subtests)               --- PASS
-=== RUN   TestRedactFixture                     --- PASS
-=== RUN   TestReportActivityRedactsStderr       --- PASS
-=== RUN   TestHandoffRedactsSecrets             --- PASS
-=== RUN   TestHandoffKeepsValidJSONArgs         --- PASS
-=== RUN   TestHandoffCompressionFooter (2)      --- PASS
-=== RUN   TestCompressionFooterCountsOnlyCommandAndStderr --- PASS
-=== RUN   TestCheckContextHealthLoopFlag        --- PASS
-=== RUN   TestCheckContextHealthHealthyDirective --- PASS
-ok  vault/cmd/vault, vault/internal/heuristics, vault/internal/mcp,
-    vault/internal/report, vault/internal/state
-```
+`go test ./... -v -count=1` — all packages pass, including the Phase-4
+suites: `TestCheckContextHealthLoopFlag`,
+`TestCheckContextHealthHealthyDirective`, `TestRedact` (8 cases),
+`TestRedactFixture`, `TestReportActivityRedactsStderr`,
+`TestHandoffRedactsSecrets`, `TestHandoffCompressionFooter` (2 cases),
+`TestCompressionFooterCountsOnlyCommandAndStderr`, `TestReportCLI`.
 
 Full `make verify` output:
 
 ```
 OK   fmt-check (nothing to format)
 OK   vet
-ok 	vault/cmd/vault	1.384s
-ok 	vault/internal/heuristics	0.399s
-ok 	vault/internal/mcp	0.022s
-ok 	vault/internal/report	0.007s
-ok 	vault/internal/state	0.204s
+ok 	vault/cmd/vault	0.739s
+ok 	vault/internal/heuristics	0.362s
+ok 	vault/internal/mcp	0.024s
+ok 	vault/internal/state	0.168s
 OK   test
 OK   build (bin/vault)
 verify: all checks passed
@@ -188,47 +117,25 @@ verify: all checks passed
 
 ## Manual verification
 
-Stdio smoke test (tools/call `report_activity` with a secret-bearing stderr,
-then `check_context_health`):
-
-```
-$ printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"report_activity",...stderr with PASSWORD= and Bearer...}}' \
-  '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"check_context_health","arguments":{}}}' \
-  | VAULT_ROOT=$R ./bin/vault
-
--> id:2 result text: "VERDICT: HEALTHY. Continue working.\n\n{\"score\":100,...}"
--> activity.jsonl stderr: "export PASSWORD=[REDACTED]; curl -H Authorization: Bearer [REDACTED] x"
-```
-
-`vault report` smoke test: 3 seeded failing TEST entries, then bare
-`vault report --root $R` → `wrote $R/.vault/report.html`, file starts with
-`<!DOCTYPE html>` and contains the RECURRING_ERROR_LOOP flag.
+Stdio smoke test: `report_activity` with a secret-bearing stderr persists
+`PASSWORD=[REDACTED]` / `Bearer [REDACTED]`; `check_context_health` returns
+`VERDICT: HEALTHY. Continue working.` followed by the Health JSON.
 
 ## Known limitations
 
-- Churn numbers in report.html come only from trees already recorded in
-  activity.jsonl; no fresh snapshot is taken at report time (deliberate: the
-  report must be reproducible).
-- Redaction is regex-based and substring-tolerant for KEY/TOKEN/SECRET/
-  PASSWORD names, so identifiers like `monkey=1` or `hockey=1` get masked.
-  Non-`sk-` API-key formats (e.g. GitHub `ghp_...`) are not covered.
-- Token estimates are `characters/4` (integer division), an approximation by
-  design.
-- The recent-activity table in report.html caps at the last 20 rows.
+- Redaction is regex-based; non-`sk-` key formats (e.g. `ghp_…`) are not
+  covered; substring false positives (e.g. `monkey=1`) are masked.
+- Token estimates are `characters/4` (integer division), by design.
 
 ## Handoff to next phase
 
-All four Phase-4 features are committed and green. Next phases (per the
-original roadmap): whatever the next directive lists — the state package now
-owns directive rendering, the report package is ready for extra sections, and
-`Redact` can be extended with more patterns in `internal/heuristics/redact.go`.
+The codebase is back to a clean CLI + MCP shape: telemetry recording,
+health directive, redaction, and handoff compression. No web UI remains.
 
 ## Metadata
 
-- Commit: `7bc509d` (docs; tagged `phase-4-done`); features in
-  `d1ea473`…`161b4c8`
-- Tag: `phase-4-done`
-- Branch: `cline/d7a73` (fast-forwarded into `main`)
-
-
+- Branch: `cline/d7a73` (main diverged earlier via a parallel session; see
+  phase 4c notes — not fast-forwarded).
+- Tag: `phase-4-done` re-pointed to the removal commit; `phase-4c-done`
+  deleted.
 

@@ -38,8 +38,8 @@ Baseline: `make verify` green, `go test -race ./...` clean, plugin
   - `atomicWrite` (handoff.go): `os.CreateTemp` in the destination directory
     (same filesystem → atomic rename); write-error path closes + removes;
     close-error and rename-error paths remove. No leak.
-  - All reads (`readActivities`, `countActivities`, `readHandoff`,
-    `report.readActivities`) use `os.ReadFile`, which closes internally.
+  - All reads (`readActivities`, `countActivities`, `readHandoff`) use
+    `os.ReadFile`, which closes internally.
   - `gitSnapshot` temp index (see §3).
 - **Append safety under concurrent writers.** The telemetry plugin spawns
   one `vault report '<json>'` process per tool event. If Cline runs tools in
@@ -54,10 +54,6 @@ Baseline: `make verify` green, `go test -race ./...` clean, plugin
 
 ### Residual findings (severity LOW)
 
-- **LOW-1: `report.html` is written non-atomically** (report.go:
-  `os.WriteFile`). A crash mid-write leaves a truncated report. The file is
-  regenerable on demand (`vault report`), so impact is nil for the demo.
-  Remediation: temp-file + rename (mirror `state.atomicWrite`).
 - **LOW-2: archive name collision.** `archiveActivity` names archives
   `activity-<UTC-second>.jsonl`; two rotations within the same second make
   the second `os.Rename` silently overwrite the first. Realistic demo impact:
@@ -211,8 +207,8 @@ Baseline: `make verify` green, `go test -race ./...` clean, plugin
   `monkey=1` get masked) are the accepted spec-literal trade-offs, noted in
   the file header and Phase-4 report.
 - **Placement verified:** stderr is redacted before `activity.jsonl`; the
-  whole handoff body is redacted before the atomic write; the HTML report
-  redacts commands and never renders stderr. No path writes a raw secret.
+  whole handoff body is redacted before the atomic write. No path writes a
+  raw secret.
   **Empirical:** live stdio smoke test showed
   `PASSWORD=[REDACTED]` / `Bearer [REDACTED]` in the persisted log.
 
@@ -258,7 +254,6 @@ Baseline: `make verify` green, `go test -race ./...` clean, plugin
 | ID | Severity | Location | Summary |
 |---|---|---|---|
 | MEDIUM-1 | Medium | mcp/mcp.go `Serve` | Line buffered before 4 MB cap check; huge line costs ~2× memory |
-| LOW-1 | Low | report/report.go | report.html written non-atomically |
 | LOW-2 | Low | state/handoff.go | Archive filename has 1 s resolution; same-second overwrite |
 | LOW-3 | Low | state/state.go | Append follows symlinks (trusted-workspace threat model) |
 | LOW-4 | Low | plugin index.ts | E2BIG payload silently drops one telemetry record |

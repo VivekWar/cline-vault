@@ -42,3 +42,12 @@ build:
 .NOTPARALLEL: verify
 verify: fmt-check vet test build
 	@echo "verify: all checks passed"
+
+# One-command setup: prereq checks, build, MCP registration, plugin deps,
+# .clinerules hook and a smoke test. Uninstall removes only the MCP entry.
+.PHONY: install uninstall
+install:
+	./scripts/install.sh
+
+uninstall:
+	./scripts/install.sh --uninstall
