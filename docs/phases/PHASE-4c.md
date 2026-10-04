@@ -174,7 +174,11 @@ ready for middleware (auth, CORS).
 
 ## Metadata
 
-- Commit: `2f2a816` (feature; docs/tag follow)
+- Commit: `2f2a816` (feature), `a25b908` (docs)
 - Tag: `phase-4c-done`
-- Branch: `cline/d7a73` (fast-forwarded into `main`)
+- Branch: `cline/d7a73` — NOT yet fast-forwarded into `main`: the ff-only
+  merge was blocked because `main` diverged (parallel Phase 5 session
+  committed `afc1588` + `1dd8530` directly to `main`; merge-base `4bd18f0`).
+  Per `.clinerules`, stopped and reported; no force/rebase/reset.
+
 
