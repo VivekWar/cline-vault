@@ -30,6 +30,9 @@ func main() {
 		case "report":
 			runReport(os.Args[2:])
 			return
+		case "mcp-register":
+			runMCPRegister(os.Args[2:])
+			return
 		}
 	}
 

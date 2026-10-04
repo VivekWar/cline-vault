@@ -33,3 +33,4 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
   terminal command the agent runs to `.vault/activity.jsonl` via its afterTool hook.
   No manual report_activity calls are needed.
 - To resume previous work, call vault read_handoff first.
+After any failing command, call check_context_health. If the verdict is DEGRADED, stop and call create_handoff.
