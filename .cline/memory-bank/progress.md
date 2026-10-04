@@ -1,5 +1,14 @@
 # Memory Bank — Progress
 
+Phase 4: DONE — Feature Expansion: B) check_context_health returns a
+natural-language directive (VERDICT: HEALTHY/DEGRADED) before the Health
+JSON; C) new internal/report package + `vault report` (no payload) writes
+self-contained .vault/report.html (flags, churn net/gross bars, error loops);
+D) pure heuristics.Redact masks sk- keys, bearer tokens, PEM private keys and
+KEY/TOKEN/SECRET/PASSWORD= pairs in activity stderr and handoff output;
+E) handoff_state.md gains a "Vault Compression Estimate" footer (chars/4).
+make verify green; commits d1ea473..161b4c8, tag `phase-4-done`.
+
 Phase 3c: DONE — telemetry optimization & hardening: READ activities skip the
 git snapshot; DetectOscillation gained a snapshots gate (micro-oscillation,
 env VAULT_CHURN_MIN_SNAPSHOTS default 10). Tests-first, make verify green;
