@@ -1,5 +1,21 @@
 # Memory Bank — Progress
 
+Phase 7 (final submission docs): DONE — README.md completely rewritten as the
+pitch + quickstart (title "Vault: Autonomous Context Health & Handoffs for AI
+Agents", context-rot problem, the Vault solution, a "Why judges should care"
+table, copy-paste quickstart with the exact MCP JSON block + per-platform
+settings paths, the agent rule, verify/uninstall/troubleshooting, and a
+prominent navigation link to the master doc). New docs/ARCHITECTURE_AND_DESIGN.md
+(the master document): Mermaid flowchart TD + sequence lifecycle; the
+mathematics of context rot (H1 normalization pipeline + Jaccard ≥ 0.70 across
+the last 3 failed commands; H2 net/gross git-tree churn + temp GIT_INDEX_FILE
+snapshot technique + worked example); autonomous intervention (VERDICT:
+DEGRADED directive + handoff anatomy); security & privacy (RE2 redaction of API
+keys / Bearer tokens / PEM blocks / KEY=value pairs, git safety, no shell or
+network); the hackathon build story incl. the HTMX→pure-MCP pivot; and
+appendices (package map, data formats, env vars, limitations, testing). No Go
+changes; make verify green.
+
 Phase 7: DONE — submission documentation: README.md rewritten for
 copy-paste setup (numbered quickstart, dual MCP registration incl. manual
 JSON for Linux/macOS/Windows, plugin + agent-rule steps, verify/uninstall,
