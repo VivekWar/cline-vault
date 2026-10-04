@@ -1,6 +1,8 @@
 package report
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,13 +23,39 @@ func seed(t *testing.T, root, jsonl string) {
 	}
 }
 
+// appendLines appends raw JSONL lines to root/.vault/activity.jsonl.
+func appendLines(t *testing.T, root, jsonl string) {
+	t.Helper()
+	f, err := os.OpenFile(filepath.Join(root, ".vault", "activity.jsonl"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if _, err := f.WriteString(jsonl); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// get renders a handler for GET /path and returns the response body.
+func get(t *testing.T, h http.HandlerFunc, path string) string {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", path, nil)
+	h(rec, req)
+	return rec.Body.String()
+}
+
+// failLine is one failing TEST entry whose identical triple triggers
+// RECURRING_ERROR_LOOP.
+const failLine = `{"time":"2026-10-04T10:00:00Z","kind":"TEST","command":"go test","exit_code":1,"stderr":"assertion mismatch: expected true but got false in calc_test.go","files":["calc_test.go"],"workspace":"","tree":""}`
+
 // TestGenerateWithErrorLoop seeds three failing TEST entries with identical
-// output and asserts the report carries the total count and the
-// RECURRING_ERROR_LOOP flag.
+// output and asserts the static snapshot carries the total count, the
+// RECURRING_ERROR_LOOP flag and the polished sections — with zero external
+// assets (the static file must stay fully self-contained).
 func TestGenerateWithErrorLoop(t *testing.T) {
 	root := t.TempDir()
-	fail := `{"time":"2026-10-04T10:00:00Z","kind":"TEST","command":"go test","exit_code":1,"stderr":"assertion mismatch: expected true but got false in calc_test.go","files":["calc_test.go"],"workspace":"","tree":""}`
-	seed(t, root, strings.Join([]string{fail, fail, fail}, "\n")+"\n")
+	seed(t, root, strings.Join([]string{failLine, failLine, failLine}, "\n")+"\n")
 
 	path, err := Generate(root)
 	if err != nil {
@@ -43,29 +71,31 @@ func TestGenerateWithErrorLoop(t *testing.T) {
 	html := string(data)
 	for _, want := range []string{
 		"<!DOCTYPE html>",
-		"Vault Activity Report",
+		"Vault — Activity Report",
 		"RECURRING_ERROR_LOOP",
 		"Total actions taken",
 		"Churn: Net vs Gross",
 		"Error Loops",
+		"Recent Activity",
+		"badge-critical",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("report.html missing %q", want)
 		}
 	}
-	if !strings.Contains(html, ">3</span>") {
+	if !strings.Contains(html, `>3</div>`) {
 		t.Errorf("total actions not rendered as 3:\n%s", html)
 	}
-	// No external assets: every asset must be inline.
-	for _, external := range []string{"http://", "https://", "<link"} {
+	// The static snapshot has no HTMX and no external assets.
+	for _, external := range []string{"http://", "https://", "<link", "hx-", "htmx"} {
 		if strings.Contains(html, external) {
-			t.Errorf("report.html references external asset %q", external)
+			t.Errorf("static report.html references %q — must stay self-contained", external)
 		}
 	}
 }
 
-// TestGenerateEmpty: a missing activity log still produces a valid report
-// with zero totals and no flags.
+// TestGenerateEmpty: a missing activity log still produces a valid static
+// snapshot with zero totals and no flags.
 func TestGenerateEmpty(t *testing.T) {
 	root := t.TempDir()
 	path, err := Generate(root)
@@ -84,14 +114,63 @@ func TestGenerateEmpty(t *testing.T) {
 	}
 }
 
-// healthWithChurn builds a Health value carrying the given churn metrics.
-func healthWithChurn(net, gross float64) heuristics.Health {
-	return heuristics.Health{
-		Score:   100,
-		Status:  "healthy",
-		Reason:  "no context-rot signals detected.",
-		Flags:   []heuristics.Flag{},
-		Metrics: heuristics.Metrics{Net: net, Gross: gross, Efficiency: 0},
+// TestDashboardHandler: "/" serves the full shell — the exact HTMX script in
+// the head, the polling div with the exact hx attributes, and the content
+// pre-filled so the first paint is instant.
+func TestDashboardHandler(t *testing.T) {
+	root := t.TempDir()
+	seed(t, root, failLine+"\n")
+	html := get(t, DashboardHandler(root), "/")
+	for _, want := range []string{
+		"<!DOCTYPE html>",
+		`<script src="https://unpkg.com/htmx.org@1.9.12"></script>`,
+		`<main id="main-content" hx-get="/content" hx-trigger="every 1s" hx-swap="innerHTML">`,
+		"Total actions taken",
+		"transition: width 0.3s ease",
+		"Vault — Live Dashboard",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("dashboard missing %q", want)
+		}
+	}
+	if !strings.Contains(html, `>1</div>`) {
+		t.Errorf("dashboard must pre-fill content for the first paint:\n%s", html)
+	}
+}
+
+// TestContentHandler: "/content" serves ONLY the inner fragment — no shell,
+// no script, no styles — and reflects the current activity.
+func TestContentHandler(t *testing.T) {
+	root := t.TempDir()
+	seed(t, root, strings.Join([]string{failLine, failLine, failLine}, "\n")+"\n")
+	html := get(t, ContentHandler(root), "/content")
+	for _, want := range []string{"RECURRING_ERROR_LOOP", "Total actions taken", "Churn: Net vs Gross"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("content missing %q", want)
+		}
+	}
+	for _, forbidden := range []string{"<!DOCTYPE", "<html", "<head", "<script", "<style", "<body"} {
+		if strings.Contains(html, forbidden) {
+			t.Errorf("/content must be an inner fragment only, found %q", forbidden)
+		}
+	}
+	if !strings.Contains(html, `>3</div>`) {
+		t.Errorf("content total = want 3:\n%s", html)
+	}
+}
+
+// TestContentLiveUpdates: the fragment reflects new activity on the very
+// next request — the property HTMX's 1s polling relies on.
+func TestContentLiveUpdates(t *testing.T) {
+	root := t.TempDir()
+	seed(t, root, failLine+"\n")
+	h := ContentHandler(root)
+	if got := get(t, h, "/content"); !strings.Contains(got, `>1</div>`) {
+		t.Fatalf("first read total != 1:\n%s", got)
+	}
+	appendLines(t, root, failLine+"\n")
+	if got := get(t, h, "/content"); !strings.Contains(got, `>2</div>`) {
+		t.Fatalf("second read total != 2 (live update failed):\n%s", got)
 	}
 }
 
@@ -109,7 +188,7 @@ func TestBuildPageChurnBars(t *testing.T) {
 }
 
 // TestBuildPageRedactsCommands: secrets in the Command field must never reach
-// the report's recent-activity table.
+// the recent-activity table.
 func TestBuildPageRedactsCommands(t *testing.T) {
 	acts := []activityLine{{
 		Time:     "2026-10-04T10:00:00Z",
@@ -126,5 +205,16 @@ func TestBuildPageRedactsCommands(t *testing.T) {
 	}
 	if !strings.Contains(data.Recent[0].Command, "[REDACTED]") {
 		t.Errorf("command not redacted: %q", data.Recent[0].Command)
+	}
+}
+
+// healthWithChurn builds a Health value carrying the given churn metrics.
+func healthWithChurn(net, gross float64) heuristics.Health {
+	return heuristics.Health{
+		Score:   100,
+		Status:  "healthy",
+		Reason:  "no context-rot signals detected.",
+		Flags:   []heuristics.Flag{},
+		Metrics: heuristics.Metrics{Net: net, Gross: gross, Efficiency: 0},
 	}
 }
