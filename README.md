@@ -143,8 +143,52 @@ Then delete the clone folder. Nothing else is installed anywhere.
 
 ## Built with Cline
 
-Every line of this project was written by Cline for the hackathon. The
-phase-by-phase history is in `docs/phases/`, the build story in
-`docs/BUILD_STORY.md`, the architecture in `docs/ARCHITECTURE.md`, and the
-pre-flight audit in `docs/AUDIT.md`.
+Vault was built **entirely with [Cline](https://github.com/cline/cline)** —
+the open-source autonomous coding agent for the terminal and VS Code —
+as a hackathon project about keeping coding agents healthy.
+
+### How it was built
+
+- **Every line was written by Cline.** All of the Go code, the TypeScript
+  SDK plugin, the tests, and the documentation were produced by Cline from
+  the user's phase prompts — plan, implement, run `make verify`, commit,
+  repeat. Nothing was hand-written outside the agent.
+- **Dogfooded from the inside.** Cline used Vault's own MCP tools
+  (`report_activity`, `check_context_health`, `create_handoff`,
+  `read_handoff`) while building Vault, so the project was instrumenting
+  itself the whole time — the same tools you see in the demo.
+- **Eight phases, every one green before commit.** The full build story —
+  what each phase built, the problems found, the pivots, tags, and phase
+  reports — is in [`docs/BUILD_STORY.md`](docs/BUILD_STORY.md) and
+  [`docs/phases/`](docs/phases/).
+- **Cline even ran the security audit.** The pre-flight architectural and
+  security audit ([`docs/AUDIT.md`](docs/AUDIT.md)) was executed by Cline,
+  including empirical measurements: race detector, file-descriptor leak
+  checks across 100 writes, 40 parallel appenders, temp-file leak counts
+  under forced git failures, oversized-line memory, and adversarial
+  redaction timing.
+- **The architecture is documented end to end** in
+  [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — mermaid diagrams, package
+  map, data formats, heuristic math, and the design decisions with the
+  alternatives we rejected.
+
+### Honesty notes
+
+- The raw, unedited session logs from the build are archived locally on
+  the build machine (`~/cline-log-backups/`), not cherry-picked.
+- One `.clinerules` edit was made outside Cline (commit `d931f91`) and was
+  later superseded by the Cline-written rule text.
+- The `demo-trap/` folder used in the demo video is a **scripted
+  demonstration** — a deliberately broken module, honestly labelled, with
+  no code that sabotages fixes.
+
+### For judges
+
+This project is a working demonstration of the loop it was built to break:
+an AI agent (Cline) wrote a tool (Vault) that detects when an AI agent is
+stuck in an error loop or thrashing code — and then used that tool on
+itself while building it. Follow the Quickstart above, open
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for how it works, and
+[`docs/BUILD_STORY.md`](docs/BUILD_STORY.md) for exactly how Cline built it.
+
 
