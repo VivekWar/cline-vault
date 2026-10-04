@@ -271,16 +271,20 @@ func TestDetectOscillation(t *testing.T) {
 	cases := []struct {
 		name       string
 		net, gross float64
+		snapshots  int
 		wantFlag   bool
 	}{
-		{"below gross threshold", 0, 100, false},
-		{"low efficiency flags", 30, 300, true},
-		{"high efficiency no flag", 50, 300, false},
-		{"zero gross no flag", 0, 0, false},
+		{"below gross threshold", 0, 100, 3, false},
+		{"low efficiency flags", 30, 300, 3, true},
+		{"high efficiency no flag", 50, 300, 3, false},
+		{"zero gross no flag", 0, 0, 2, false},
+		{"micro oscillation flags", 0, 6, 12, true},
+		{"micro oscillation small net", 2, 15, 15, true},
+		{"micro oscillation below snapshot threshold", 0, 6, 9, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := DetectOscillation(tc.net, tc.gross)
+			got := DetectOscillation(tc.net, tc.gross, tc.snapshots)
 			if tc.wantFlag {
 				if got == nil || got.Name != "CODE_OSCILLATION_THRASHING" {
 					t.Fatalf("want CODE_OSCILLATION_THRASHING, got %+v", got)
@@ -341,6 +345,25 @@ func TestAssess(t *testing.T) {
 		}
 		if h.Metrics.Gross != 200 || h.Metrics.Efficiency != 0 {
 			t.Errorf("gross=%v efficiency=%v, want 200 / 0", h.Metrics.Gross, h.Metrics.Efficiency)
+		}
+	})
+
+	t.Run("micro oscillation only", func(t *testing.T) {
+		orig := diffNumstatFn
+		diffNumstatFn = func(ws, a, b string) (string, error) {
+			if a == "m1" && b == "m10" {
+				return "0\t0\tf.txt\n", nil
+			}
+			return "1\t0\tf.txt\n", nil
+		}
+		t.Cleanup(func() { diffNumstatFn = orig })
+		trees := []string{"m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m10"}
+		h := Assess("", []Entry{{Kind: "COMMAND", ExitCode: 0, Output: "ok"}}, trees)
+		if h.Score != 65 || h.Status != "degraded" {
+			t.Errorf("score=%d status=%s, want 65 degraded", h.Score, h.Status)
+		}
+		if h.Metrics.Gross != 9 || h.Metrics.Efficiency != 0 {
+			t.Errorf("gross=%v efficiency=%v, want 9 / 0", h.Metrics.Gross, h.Metrics.Efficiency)
 		}
 	})
 

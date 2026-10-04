@@ -64,9 +64,37 @@ func TestChurnIntegration(t *testing.T) {
 				t.Fatalf("empty tree in %v", trees)
 			}
 		}
-		net, gross := Churn(ws, trees)
-		if f := DetectOscillation(net, gross); f == nil {
+		net, gross, snapshots := Churn(ws, trees)
+		if f := DetectOscillation(net, gross, snapshots); f == nil {
 			t.Fatalf("want oscillation flag, net=%v gross=%v (trees=%d)", net, gross, len(trees))
+		}
+	})
+
+	t.Run("micro oscillation flags", func(t *testing.T) {
+		ws := initGitRepo(t)
+		f := filepath.Join(ws, "micro.txt")
+		if err := os.WriteFile(f, []byte("if x > y {\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		var trees []string
+		trees = append(trees, Snapshot(ws)) // ">"
+		for i := 0; i < 12; i++ {
+			content := "if x > y {\n"
+			if i%2 == 0 {
+				content = "if x >= y {\n"
+			}
+			if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			trees = append(trees, Snapshot(ws))
+		}
+		// 13 snapshots, gross = 12 flips * 2 lines = 24, net = 0 (ends on ">").
+		net, gross, snapshots := Churn(ws, trees)
+		if f := DetectOscillation(net, gross, snapshots); f == nil {
+			t.Fatalf("want micro oscillation flag, net=%v gross=%v snapshots=%d", net, gross, snapshots)
+		}
+		if gross >= 100 {
+			t.Errorf("micro oscillation gross=%v, want well below 100 (line threshold must not be needed)", gross)
 		}
 	})
 
@@ -89,8 +117,8 @@ func TestChurnIntegration(t *testing.T) {
 			appendLines(50)
 			trees = append(trees, Snapshot(ws))
 		}
-		net, gross := Churn(ws, trees)
-		if f := DetectOscillation(net, gross); f != nil {
+		net, gross, snapshots := Churn(ws, trees)
+		if f := DetectOscillation(net, gross, snapshots); f != nil {
 			t.Fatalf("unexpected oscillation flag, net=%v gross=%v", net, gross)
 		}
 		if net != 150 || gross != 150 {

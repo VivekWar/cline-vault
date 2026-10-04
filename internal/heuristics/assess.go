@@ -9,9 +9,10 @@ import (
 // Threshold defaults, overridable through environment variables (the demo
 // needs tuning).
 const (
-	defaultJaccardMin    = 0.70
-	defaultChurnMinGross = 100.0
-	defaultChurnMaxEff   = 0.15
+	defaultJaccardMin        = 0.70
+	defaultChurnMinGross     = 100.0
+	defaultChurnMaxEff       = 0.15
+	defaultChurnMinSnapshots = 10
 )
 
 // Score penalties. TOOL_CALL_TRAP arrives in Phase 3 with a -30 penalty; the
@@ -25,6 +26,7 @@ const (
 func jaccardMin() float64    { return envFloat("VAULT_JACCARD_MIN", defaultJaccardMin) }
 func churnMinGross() float64 { return envFloat("VAULT_CHURN_MIN_GROSS", defaultChurnMinGross) }
 func churnMaxEff() float64   { return envFloat("VAULT_CHURN_MAX_EFF", defaultChurnMaxEff) }
+func churnMinSnapshots() int { return envInt("VAULT_CHURN_MIN_SNAPSHOTS", defaultChurnMinSnapshots) }
 
 func envFloat(name string, def float64) float64 {
 	v := os.Getenv(name)
@@ -36,6 +38,18 @@ func envFloat(name string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+func envInt(name string, def int) int {
+	v := os.Getenv(name)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
 }
 
 // Metrics carries the raw numbers behind the health score.
@@ -80,11 +94,11 @@ func Assess(workspace string, entries []Entry, trees []string) Health {
 		}
 	}
 
-	net, gross := Churn(workspace, trees)
+	net, gross, snapshots := Churn(workspace, trees)
 	h.Metrics.Net = round2(net)
 	h.Metrics.Gross = round2(gross)
 	h.Metrics.Efficiency = round2(churnEfficiency(net, gross))
-	if f := DetectOscillation(net, gross); f != nil {
+	if f := DetectOscillation(net, gross, snapshots); f != nil {
 		h.Flags = append(h.Flags, *f)
 		h.Score -= penaltyOscillation
 	}

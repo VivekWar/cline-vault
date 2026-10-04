@@ -69,14 +69,16 @@ func gitSnapshot(workspace string) string {
 	return tree
 }
 
-// Churn computes net and gross churn over consecutive tree snapshots. gross is
-// the sum over consecutive pairs of (added+deleted); net is (added+deleted)
-// from the first to the last tree. Empty trees and consecutive duplicates are
-// skipped. Binary files count as 0.
-func Churn(workspace string, trees []string) (net, gross float64) {
+// Churn computes net, gross and the distinct-snapshot count over consecutive
+// tree snapshots. gross is the sum over consecutive pairs of (added+deleted);
+// net is (added+deleted) from the first to the last tree; snapshots is the
+// count after skipping empty trees and consecutive duplicates. Binary files
+// count as 0.
+func Churn(workspace string, trees []string) (net, gross float64, snapshots int) {
 	ts := compactTrees(trees)
+	snapshots = len(ts)
 	if len(ts) < 2 {
-		return 0, 0
+		return 0, 0, snapshots
 	}
 	for i := 0; i < len(ts)-1; i++ {
 		out, err := diffNumstatFn(workspace, ts[i], ts[i+1])
@@ -88,11 +90,11 @@ func Churn(workspace string, trees []string) (net, gross float64) {
 	}
 	out, err := diffNumstatFn(workspace, ts[0], ts[len(ts)-1])
 	if err != nil {
-		return 0, gross
+		return 0, gross, snapshots
 	}
 	a, d := parseNumstat(out)
 	net = float64(a + d)
-	return net, gross
+	return net, gross, snapshots
 }
 
 // compactTrees drops empty trees and consecutive duplicates.
@@ -148,14 +150,15 @@ func churnEfficiency(net, gross float64) float64 {
 	return net / gross
 }
 
-// DetectOscillation flags CODE_OSCILLATION_THRASHING when gross > threshold
-// and net/gross < threshold (lots of churn that ends roughly where it began).
-func DetectOscillation(net, gross float64) *Flag {
-	if gross <= churnMinGross() {
-		return nil
-	}
+// DetectOscillation flags CODE_OSCILLATION_THRASHING when churn is
+// inefficient: net/gross is below the efficiency threshold AND either the line
+// churn exceeds the gross threshold or at least churnMinSnapshots distinct
+// snapshots were taken. The snapshot gate catches micro-oscillations (e.g.
+// flipping a single line back and forth) whose line churn stays small.
+func DetectOscillation(net, gross float64, snapshots int) *Flag {
 	eff := churnEfficiency(net, gross)
-	if eff < churnMaxEff() {
+	// Flag if we exceed the line threshold OR if we've thrashed for 10+ snapshots
+	if (gross > churnMinGross() || snapshots >= churnMinSnapshots()) && eff < churnMaxEff() {
 		return &Flag{
 			Name: "CODE_OSCILLATION_THRASHING",
 			Evidence: OscillationEvidence{

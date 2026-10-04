@@ -320,3 +320,48 @@ func readHandoffFile(t *testing.T, st *State) string {
 	}
 	return string(data)
 }
+
+// TestReportActivitySkipsSnapshotForRead: READ activities must not trigger a
+// git snapshot (no `tree` field), while other kinds still record the tree
+// hash of the workspace.
+func TestReportActivitySkipsSnapshotForRead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ws := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = ws
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	git("config", "user.email", "t@example.com")
+	git("config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(ws, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "f.txt")
+	git("commit", "-q", "-m", "base")
+
+	st := New(t.TempDir())
+	mustReport(t, st, `{"kind":"READ","command":"cat f.txt","exit_code":0,"files":["f.txt"],"workspace":"`+ws+`"}`)
+	mustReport(t, st, `{"kind":"EDIT","command":"edited f.txt","exit_code":0,"files":["f.txt"],"workspace":"`+ws+`"}`)
+
+	data, err := os.ReadFile(filepath.Join(st.vault, "activity.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("got %d activity lines, want 2: %s", len(lines), data)
+	}
+	if strings.Contains(lines[0], `"tree"`) {
+		t.Errorf("READ activity must not carry a tree field: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], `"tree"`) {
+		t.Errorf("EDIT activity must carry a tree field: %s", lines[1])
+	}
+}

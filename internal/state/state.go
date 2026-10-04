@@ -100,6 +100,13 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	if args.Files == nil {
 		args.Files = []string{}
 	}
+	// Snapshot the git tree for churn tracking. READ activities are pure
+	// observations: skipping the snapshot avoids a full `git add -A` +
+	// `git write-tree` per read (compactTrees ignores empty trees anyway).
+	tree := ""
+	if args.Kind != "READ" {
+		tree = heuristics.Snapshot(s.gitDir(args.Workspace))
+	}
 	entry := activityEntry{
 		Time:      time.Now().UTC().Format(time.RFC3339),
 		Kind:      args.Kind,
@@ -108,7 +115,7 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 		Stderr:    args.Stderr,
 		Files:     args.Files,
 		Workspace: args.Workspace,
-		Tree:      heuristics.Snapshot(s.gitDir(args.Workspace)),
+		Tree:      tree,
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {
