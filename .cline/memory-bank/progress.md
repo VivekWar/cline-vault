@@ -1,9 +1,10 @@
 # Memory Bank — Progress
 
-Phase 3b: DONE — telemetry blindspot patch: the plugin now intercepts edit tools
-(write_to_file, replace_file_content, edit_file, insert_content) as kind EDIT so
-H2 churn is fed by pure edit sessions. 19/19 plugin tests + smoke test green;
-committed 4bc554c, tag `phase-3b-done`.
+Phase 3b: DONE — telemetry architecture fix: the plugin no longer writes
+activity.jsonl directly; it spawns the new `vault report '<json>'` subcommand
+so the Go server takes the git snapshot (tree field populated, H2 churn fed).
+Edit-tool interception retained. 19/19 plugin tests + architecture smoke test
+green; committed 61d9850, tag `phase-3b-done` (re-tagged).
 
 Phase 3: DONE — SDK plugin pivot: `.cline/plugins/vault-telemetry/` TypeScript
 plugin auto-appends every terminal command to `.vault/activity.jsonl` via the
