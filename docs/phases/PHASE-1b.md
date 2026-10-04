@@ -144,3 +144,12 @@ storms), backed by `testdata/` fixtures and table-driven tests.
 - Commit: `2299469` (feat) + `a0aa3e4` (docs addendum); this report is
   committed by the checklist run.
 
+## USER ACTION REQUIRED
+
+Reload the MCP server (restart Cline or its MCP connection) so the updated
+settings take effect. I edited and validated
+`/home/vivek/.cline/data/settings/cline_mcp_settings.json` (vault entry:
+`disabled=false`, `autoApprove` = report_activity, check_context_health,
+create_handoff, read_handoff; backup at `cline_mcp_settings.json.bak`), but I
+cannot trigger Cline's live reload from here.
+
