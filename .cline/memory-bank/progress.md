@@ -1,5 +1,10 @@
 # Memory Bank — Progress
 
+Phase 3c: DONE — telemetry optimization & hardening: READ activities skip the
+git snapshot; DetectOscillation gained a snapshots gate (micro-oscillation,
+env VAULT_CHURN_MIN_SNAPSHOTS default 10). Tests-first, make verify green;
+committed a19f1ba, tag `phase-3c-done`.
+
 Phase 3b: DONE — telemetry architecture fix: the plugin no longer writes
 activity.jsonl directly; it spawns the new `vault report '<json>'` subcommand
 so the Go server takes the git snapshot (tree field populated, H2 churn fed).
