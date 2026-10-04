@@ -1,6 +1,32 @@
 # Memory Bank — Progress
 
-## 2026-10-04 — Phase 0 hardening & documentation
+## 2026-10-04 — Phase 1: stdio MCP server skeleton
+
+**Status: DONE** — `make verify` green; committed as
+"feat: phase 1 stdio MCP server skeleton", tag `phase-1-done`.
+
+Built:
+- `cmd/vault/main.go` — stdio entrypoint; VAULT_ROOT (abs) else cwd; no
+  `.vault/` pre-creation; logs to stderr only.
+- `internal/mcp` — `bufio.Reader.ReadBytes('\n')` loop, 4 MB line cap
+  (oversized → -32700 id null, keep serving); raw id echo; notifications
+  never answered; ping → `{"result":{}}`; tools/list + tools/call
+  (isError:true for tool failures); initialize echoes protocolVersion
+  (default "2025-06-18").
+- `internal/state` — `report_activity` (appends RFC3339 JSON line,
+  "recorded #N"), `check_context_health` STUB (score 100), `create_handoff`
+  (8 H2 sections in order, deduped touched files, last-3-failing stderr,
+  git state or "git unavailable", atomic temp+rename write).
+- Tests (10, all passing): transcript/4-lines/3-tools, initialize default,
+  ping non-null + string id, table-driven error cases (-32700/-32601/
+  isError + keep-serving), oversized line, activity counts + on-demand
+  .vault, handoff headings/dedup, e2e binary test.
+
+Docs: `docs/phases/PHASE-1.md`. Cline MCP config snippet in phase report.
+
+Next: Phase 2 candidates — implement actual context-rot heuristics behind
+`check_context_health` (deterministic, offline), wire testdata fixtures.
+
 
 **Status: DONE** (no feature code)
 
