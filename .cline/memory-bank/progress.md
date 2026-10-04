@@ -1,5 +1,23 @@
 # Memory Bank — Progress
 
+## 2026-10-04 — Phase 0 hardening & documentation
+
+**Status: DONE** (no feature code)
+
+- Verified project repo isolation: parent repo `/home/vivek` tracks/stages
+  nothing from this project (commit scare left zero contamination).
+- `.gitignore` extended: `.vault/`, `coverage.out`, `*.out`, `*.test`.
+- Makefile skip logic tightened: vet/test/build SKIP only on zero `.go` files
+  (reason printed); otherwise run for real and fail on error — proven with a
+  temporary failing test (`make verify` exit=2), then cleaned up.
+- `.clinerules`: added go.mod stays at `go 1.21`, no newer language features.
+- `docs/phases/PHASE-0.md` written (goal, decisions, problems, evidence).
+- Commit "chore: phase 0 hardening and documentation", tag `phase-0-done`.
+
+Next: implement minimal stdio JSON-RPC 2.0 loop in `cmd/vault` (respond to
+`initialize`, no response to `initialized`, all logs to stderr), then
+`make verify`.
+
 ## 2026-10-04 — Dev environment setup
 
 **Status: DONE** (environment only; no Vault features implemented)

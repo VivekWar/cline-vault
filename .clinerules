@@ -4,6 +4,7 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 
 ## Language & dependencies
 - Go 1.21+; standard library only.
+- Keep go.mod at `go 1.21` and never use language features newer than Go 1.21 (e.g. no range-over-int).
 - No external dependencies without explicit user approval.
 
 ## MCP protocol

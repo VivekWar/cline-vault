@@ -1,2 +1,10 @@
 # Build artifacts
 bin/
+
+# Vault runtime state
+.vault/
+
+# Test / coverage artifacts
+coverage.out
+*.out
+*.test
