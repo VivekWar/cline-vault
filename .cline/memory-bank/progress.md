@@ -1,5 +1,10 @@
 # Memory Bank — Progress
 
+Phase 3: DONE — SDK plugin pivot: `.cline/plugins/vault-telemetry/` TypeScript
+plugin auto-appends every terminal command to `.vault/activity.jsonl` via the
+afterTool hook; manual telemetry instructions removed from `.clinerules`.
+TS compiles, 14 unit tests + smoke test green; committed b847c16, tag `phase-3-done`.
+
 Phase 2: DONE — H1 recurring-error-loop (Jaccard), H2 code-oscillation (git tree
 churn), and the Health aggregator; check_context_health is real, `vault health`
 CLI added. `make verify` green; committed 6426b53, tag `phase-2-done`.
