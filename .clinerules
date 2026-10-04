@@ -28,8 +28,8 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 - After a green commit, fast-forward main: git -C /home/vivek/Documents/ClineAiHackathon merge --ff-only <your current branch>, then run make -C /home/vivek/Documents/ClineAiHackathon build.
 - At the end of every phase, execute docs/PHASE_CHECKLIST.md completely.
 
-## Vault telemetry (MANDATORY)
-- Run ONE command per terminal call. No `;` or `&&` chains.
-- Immediately after EACH command, call vault report_activity. Do not batch calls. Use kind TEST for test runs, otherwise COMMAND. Pass the verbatim exit_code, stderr = the last 40 lines of the failing output (stdout AND stderr combined — go test prints failures to stdout), the files involved, and workspace = your absolute current directory.
-- After every file edit, call report_activity with kind EDIT, the files, and workspace.
+## Vault telemetry
+- Telemetry is automatic: the Vault SDK plugin (`.cline/plugins/vault-telemetry`) appends every
+  terminal command the agent runs to `.vault/activity.jsonl` via its afterTool hook.
+  No manual report_activity calls are needed.
 - To resume previous work, call vault read_handoff first.
