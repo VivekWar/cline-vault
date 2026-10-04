@@ -144,3 +144,11 @@ thresholds via the env vars.
 - Tag: `phase-2-done`
 - Branch: `cline/cbf4d`
 
+## USER ACTION REQUIRED
+
+- Reload/restart the Vault MCP server in Cline so the rebuilt binary
+  (`/home/vivek/Documents/ClineAiHackathon/bin/vault`) and the settings
+  (`disabled: false`, VAULT_ROOT, autoApprove) take effect. Everything else
+  (build, verify, merge, tag, settings edit, log backup) was completed.
+
+
