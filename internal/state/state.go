@@ -11,6 +11,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"vault/internal/heuristics"
 )
 
 // State manages Vault's state directory rooted at root.
@@ -50,6 +52,7 @@ type activityEntry struct {
 	Stderr    string   `json:"stderr"`
 	Files     []string `json:"files"`
 	Workspace string   `json:"workspace"`
+	Tree      string   `json:"tree,omitempty"`
 }
 
 // validKinds is the fixed enum of activity kinds.
@@ -105,6 +108,7 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 		Stderr:    args.Stderr,
 		Files:     args.Files,
 		Workspace: args.Workspace,
+		Tree:      heuristics.Snapshot(s.gitDir(args.Workspace)),
 	}
 	line, err := json.Marshal(entry)
 	if err != nil {
@@ -130,8 +134,9 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	return fmt.Sprintf("recorded #%d", n), false
 }
 
-// checkContextHealth is a STUB: always score 100 until heuristics land. The
-// optional workspace arg is accepted for API parity but unused by the stub.
+// checkContextHealth returns the aggregated Health JSON for the session since
+// the last rotation, taking a fresh snapshot of workspace (or VAULT_ROOT) to
+// act as the latest point.
 func (s *State) checkContextHealth(argsJSON json.RawMessage) (string, bool) {
 	var args struct {
 		Workspace string `json:"workspace"`
@@ -141,20 +146,42 @@ func (s *State) checkContextHealth(argsJSON json.RawMessage) (string, bool) {
 			return fmt.Sprintf("invalid arguments: %v", err), true
 		}
 	}
-	n, err := s.countActivities()
+	data, err := s.HealthJSON(args.Workspace)
 	if err != nil {
-		return fmt.Sprintf("cannot count activities: %v", err), true
+		return fmt.Sprintf("cannot assess health: %v", err), true
 	}
-	data, err := json.Marshal(map[string]any{
-		"score":          100,
-		"flags":          []any{},
-		"reason":         "stub: heuristics not implemented yet",
-		"activity_count": n,
-	})
+	return data, false
+}
+
+// HealthJSON computes the current context health for workspace (or root) and
+// returns it as a JSON object string.
+func (s *State) HealthJSON(workspace string) (string, error) {
+	entries, err := s.readActivities()
 	if err != nil {
-		return fmt.Sprintf("marshal health: %v", err), true
+		return "", err
 	}
-	return string(data), false
+	hsEntries := make([]heuristics.Entry, 0, len(entries))
+	trees := make([]string, 0, len(entries)+1)
+	for _, e := range entries {
+		hsEntries = append(hsEntries, heuristics.Entry{
+			Kind:     e.Kind,
+			ExitCode: e.ExitCode,
+			Output:   e.Stderr,
+		})
+		if e.Tree != "" {
+			trees = append(trees, e.Tree)
+		}
+	}
+	ws := s.gitDir(workspace)
+	if tree := heuristics.Snapshot(ws); tree != "" {
+		trees = append(trees, tree)
+	}
+	health := heuristics.Assess(ws, hsEntries, trees)
+	data, err := json.Marshal(health)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // countActivities returns the number of lines in activity.jsonl (0 if absent).

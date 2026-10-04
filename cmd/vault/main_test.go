@@ -86,3 +86,38 @@ func findModuleRoot(t *testing.T) string {
 		dir = parent
 	}
 }
+
+// TestHealthCLI builds the binary and asserts `vault health --root <tmp>`
+// prints a valid Health JSON object to stdout and exits 0.
+func TestHealthCLI(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "vault")
+	modRoot := findModuleRoot(t)
+	build := exec.Command("go", "build", "-o", bin, "./cmd/vault")
+	build.Dir = modRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build failed: %v\n%s", err, out)
+	}
+
+	proc := exec.Command(bin, "health", "--root", t.TempDir())
+	var stdout, stderr bytes.Buffer
+	proc.Stdout = &stdout
+	proc.Stderr = &stderr
+	if err := proc.Run(); err != nil {
+		t.Fatalf("vault health exited with error: %v\nstderr: %s", err, stderr.String())
+	}
+
+	var h struct {
+		Score  int    `json:"score"`
+		Status string `json:"status"`
+		Reason string `json:"reason"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &h); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v (%s)", err, stdout.String())
+	}
+	if h.Status == "" {
+		t.Errorf("missing status in %s", stdout.String())
+	}
+	if h.Score != 100 {
+		t.Errorf("empty repo score = %d, want 100 (%s)", h.Score, stdout.String())
+	}
+}

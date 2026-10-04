@@ -1,0 +1,5 @@
+=== RUN   TestMul
+--- FAIL: TestMul (0.033s)
+    mul_test.go:8: Mul(2, 3) should equal 5, got 6
+FAIL
+FAIL	example.com/pkg/calc	0.501s

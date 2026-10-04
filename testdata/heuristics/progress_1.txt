@@ -1,0 +1,4 @@
+# example.com/pkg/calc
+./calc.go:10:2: undefined: helper
+./calc.go:12:5: syntax error: unexpected newline
+FAIL	example.com/pkg/calc [build failed]

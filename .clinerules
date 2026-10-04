@@ -30,6 +30,6 @@ Keep this file SHORT. Explanations and rationale live in ARCHITECTURE.md.
 
 ## Vault telemetry (MANDATORY)
 - Run ONE command per terminal call. No `;` or `&&` chains.
-- Immediately after EACH command, call vault report_activity. Do not batch calls. Use kind TEST for test runs, otherwise COMMAND. Pass the verbatim exit_code, the last 40 lines of stderr if the command failed, the files involved, and workspace = your absolute current directory.
+- Immediately after EACH command, call vault report_activity. Do not batch calls. Use kind TEST for test runs, otherwise COMMAND. Pass the verbatim exit_code, stderr = the last 40 lines of the failing output (stdout AND stderr combined — go test prints failures to stdout), the files involved, and workspace = your absolute current directory.
 - After every file edit, call report_activity with kind EDIT, the files, and workspace.
 - To resume previous work, call vault read_handoff first.

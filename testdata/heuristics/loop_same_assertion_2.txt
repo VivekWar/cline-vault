@@ -1,0 +1,5 @@
+=== RUN   TestAdd
+--- FAIL: TestAdd (0.087s)
+    /home/alice/other/pkg/calc/calc_test.go:97: Add(1, 1) should equal 3, got 2
+FAIL
+FAIL	example.com/other/pkg/calc	1.052s

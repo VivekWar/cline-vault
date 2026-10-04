@@ -32,7 +32,7 @@ var tools = []tool{
 	},
 	{
 		Name:        "check_context_health",
-		Description: "Check AI-agent context health. STUB in phase 1: always score 100.",
+		Description: "Check AI-agent context health (context-rot detection: recurring error loops and code oscillation).",
 		InputSchema: json.RawMessage(checkHealthSchema),
 	},
 	{
