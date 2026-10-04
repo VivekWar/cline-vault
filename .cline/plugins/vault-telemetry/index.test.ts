@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { extractCommand, extractResult, lastLines, buildLine } from "./index.js";
+import { extractCommand, extractFilePath, extractResult, lastLines, buildLine } from "./index.js";
 
 test("extractCommand: run_commands array input is joined", () => {
 	assert.equal(
@@ -21,6 +21,28 @@ test("extractCommand: unknown input yields empty", () => {
 	assert.equal(extractCommand(null), "");
 	assert.equal(extractCommand({}), "");
 	assert.equal(extractCommand(42), "");
+});
+
+test("extractFilePath: file_path field", () => {
+	assert.equal(extractFilePath({ file_path: "/home/vivek/proj/a.go" }), "/home/vivek/proj/a.go");
+});
+
+test("extractFilePath: path field", () => {
+	assert.equal(extractFilePath({ path: "src/lib.ts", content: "x" }), "src/lib.ts");
+});
+
+test("extractFilePath: file_path wins over path", () => {
+	assert.equal(
+		extractFilePath({ file_path: "/a.go", path: "/b.go" }),
+		"/a.go",
+	);
+});
+
+test("extractFilePath: missing or non-string yields empty", () => {
+	assert.equal(extractFilePath({}), "");
+	assert.equal(extractFilePath({ file_path: 7 }), "");
+	assert.equal(extractFilePath(null), "");
+	assert.equal(extractFilePath("plain string"), "");
 });
 
 test("extractResult: SDK success array", () => {
@@ -82,7 +104,7 @@ test("lastLines: short text unchanged", () => {
 
 test("buildLine: exact Vault JSON line shape", () => {
 	const line = buildLine(
-		{ command: "go test ./...", exitCode: 1, output: "line1\nline2" },
+		{ kind: "COMMAND", command: "go test ./...", exitCode: 1, output: "line1\nline2", files: [] },
 		new Date("2026-10-04T12:00:00.000Z"),
 		"/home/vivek/proj",
 	);
@@ -100,7 +122,7 @@ test("buildLine: exact Vault JSON line shape", () => {
 test("buildLine: stderr truncated to the last 40 lines", () => {
 	const big = Array.from({ length: 100 }, (_, i) => `L${i}`).join("\n");
 	const line = buildLine(
-		{ command: "x", exitCode: 0, output: big },
+		{ kind: "COMMAND", command: "x", exitCode: 0, output: big, files: [] },
 		new Date("2026-10-04T12:00:00.000Z"),
 		"/ws",
 	);
@@ -108,4 +130,21 @@ test("buildLine: stderr truncated to the last 40 lines", () => {
 	assert.equal(parsed.stderr.split("\n").length, 40);
 	assert.ok(parsed.stderr.startsWith("L60"));
 	assert.ok(parsed.stderr.endsWith("L99"));
+});
+
+test("buildLine: EDIT kind line shape", () => {
+	const line = buildLine(
+		{ kind: "EDIT", command: "edited /home/vivek/proj/pkg/calc.go", exitCode: 0, output: "", files: ["/home/vivek/proj/pkg/calc.go"] },
+		new Date("2026-10-04T12:00:00.000Z"),
+		"/home/vivek/proj",
+	);
+	const parsed = JSON.parse(line);
+	assert.equal(parsed.time, "2026-10-04T12:00:00.000Z");
+	assert.equal(parsed.kind, "EDIT");
+	assert.equal(parsed.command, "edited /home/vivek/proj/pkg/calc.go");
+	assert.equal(parsed.exit_code, 0);
+	assert.equal(parsed.stderr, "");
+	assert.deepEqual(parsed.files, ["/home/vivek/proj/pkg/calc.go"]);
+	assert.equal(parsed.workspace, "/home/vivek/proj");
+	assert.ok(line.endsWith("\n"));
 });

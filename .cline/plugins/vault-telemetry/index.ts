@@ -1,11 +1,12 @@
 // Vault telemetry plugin for the Cline SDK.
 //
-// Uses the afterTool lifecycle hook to intercept every terminal command the
-// agent runs (run_commands in the Cline SDK/CLI, execute_command in the VS
-// Code extension) and appends one JSON line to .vault/activity.jsonl in the
-// workspace root, in the exact shape Vault's Go server expects:
+// Uses the afterTool lifecycle hook to intercept terminal commands the agent
+// runs (run_commands in the Cline SDK/CLI, execute_command in the VS Code
+// extension) and file edits (write_to_file, replace_file_content, edit_file,
+// insert_content) and appends one JSON line per call to .vault/activity.jsonl
+// in the workspace root, in the exact shape Vault's Go server expects:
 //
-//	{"time":...,"kind":"COMMAND","command":...,"exit_code":...,"stderr":...,"files":[],"workspace":...}
+//	{"time":...,"kind":"COMMAND"|"EDIT","command":...,"exit_code":...,"stderr":...,"files":[...],"workspace":...}
 //
 // Observational only: the hook never throws and never modifies tool results.
 import type { AgentPlugin } from "@cline/sdk";
@@ -17,15 +18,21 @@ import * as path from "node:path";
 // covers older CLI builds.
 const COMMAND_TOOL_NAMES = new Set(["run_commands", "execute_command", "run_command"]);
 
+// Tool names that edit files. Intercepting these keeps H2 (churn) fed with
+// snapshots even when the agent edits without running any commands.
+const EDIT_TOOL_NAMES = new Set(["write_to_file", "replace_file_content", "edit_file", "insert_content"]);
+
 // Workspace root resolved at setup() time from the host workspace context;
 // the hook falls back to VAULT_ROOT or process.cwd() if setup never ran.
 let workspaceRoot = "";
 let activityPath = "";
 
-interface CommandRecord {
+interface ActivityRecord {
+	kind: "COMMAND" | "EDIT";
 	command: string;
 	exitCode: number;
 	output: string;
+	files: string[];
 }
 
 /** Extract the command string(s) from a tool input. */
@@ -40,6 +47,20 @@ export function extractCommand(input: unknown): string {
 		}
 		if (typeof obj.command === "string") {
 			return obj.command;
+		}
+	}
+	return "";
+}
+
+/** Extract the edited file path from an edit-tool input. */
+export function extractFilePath(input: unknown): string {
+	if (input && typeof input === "object") {
+		const obj = input as Record<string, unknown>;
+		if (typeof obj.file_path === "string" && obj.file_path.length > 0) {
+			return obj.file_path;
+		}
+		if (typeof obj.path === "string" && obj.path.length > 0) {
+			return obj.path;
 		}
 	}
 	return "";
@@ -117,15 +138,15 @@ export function lastLines(text: string, n: number): string {
 }
 
 /** Build the single JSON line Vault's activity log expects. */
-export function buildLine(rec: CommandRecord, now: Date, workspace: string): string {
+export function buildLine(rec: ActivityRecord, now: Date, workspace: string): string {
 	return (
 		JSON.stringify({
 			time: now.toISOString(),
-			kind: "COMMAND",
+			kind: rec.kind,
 			command: rec.command,
 			exit_code: rec.exitCode,
 			stderr: lastLines(rec.output, 40),
-			files: [],
+			files: rec.files,
 			workspace: workspace,
 		}) + "\n"
 	);
@@ -143,7 +164,7 @@ function resolveRoot(setupCtx: unknown): string {
 	return process.cwd();
 }
 
-function appendLine(rec: CommandRecord): void {
+function appendLine(rec: ActivityRecord): void {
 	if (!activityPath) {
 		workspaceRoot = resolveRoot(undefined);
 		activityPath = path.join(workspaceRoot, ".vault", "activity.jsonl");
@@ -163,15 +184,28 @@ const plugin: AgentPlugin = {
 		afterTool(context) {
 			try {
 				const toolName = context.toolCall?.toolName ?? context.tool?.name ?? "";
-				if (!COMMAND_TOOL_NAMES.has(toolName)) {
+				if (COMMAND_TOOL_NAMES.has(toolName)) {
+					const command = extractCommand(context.input);
+					if (!command) {
+						return;
+					}
+					const { output, exitCode } = extractResult(context.result);
+					appendLine({ kind: "COMMAND", command, exitCode, output, files: [] });
 					return;
 				}
-				const command = extractCommand(context.input);
-				if (!command) {
-					return;
+				if (EDIT_TOOL_NAMES.has(toolName)) {
+					const filePath = extractFilePath(context.input);
+					if (!filePath) {
+						return;
+					}
+					appendLine({
+						kind: "EDIT",
+						command: "edited " + filePath,
+						exitCode: 0,
+						output: "",
+						files: [filePath],
+					});
 				}
-				const { output, exitCode } = extractResult(context.result);
-				appendLine({ command, exitCode, output });
 			} catch (err) {
 				// Observational hook: log and swallow, never fail the tool.
 				console.error("[vault-telemetry] afterTool failed:", err);
