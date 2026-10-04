@@ -149,7 +149,39 @@ func buildHandoff(args createHandoffArgs, acts []activityEntry, git string) stri
 	b.WriteByte('\n')
 	// Feature D: the whole handoff is redacted, so secrets in any section
 	// (agent-supplied summaries, stderr excerpts, git status) never persist.
-	return heuristics.Redact(b.String())
+	body := heuristics.Redact(b.String())
+	return body + compressionFooter(acts, body)
+}
+
+// compressionFooter renders the Vault Compression Estimate footer appended at
+// the bottom of handoff_state.md. Tokens are estimated as characters/4.
+// X is the total characters of all Command and Stderr fields of the activity
+// history; Y is the total characters of the final handoff string. Because the
+// footer is part of that final string, Y is computed to a fixed point: the
+// digit count of Y can shift the footer length, so it iterates until stable.
+func compressionFooter(acts []activityEntry, body string) string {
+	xChars := 0
+	for _, a := range acts {
+		xChars += len(a.Command) + len(a.Stderr)
+	}
+	yChars := len(body)
+	for {
+		footer := fmt.Sprintf("---\nVault Compression Estimate: Condensed ~%d tokens of activity history into ~%d tokens of handoff state. (Saved ~%d tokens).\n",
+			xChars/4, yChars/4, savedTokens(xChars/4, yChars/4))
+		if total := len(body) + len(footer); total == yChars {
+			return footer
+		} else {
+			yChars = total
+		}
+	}
+}
+
+// savedTokens is the token savings, never negative.
+func savedTokens(x, y int) int {
+	if x > y {
+		return x - y
+	}
+	return 0
 }
 
 // orNone renders an empty value as "_none_".
