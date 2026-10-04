@@ -1,0 +1,11 @@
+go test ./... -count=1
+ok  vault/internal/heuristics  (cached)
+
+--- combined fixture log ---
+setup: export API_TOKEN=sk-4jf8w2hYpQdLmN7vXc3gKtR9uEa5z
+request: Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.part2.part3
+key material: -----BEGIN PRIVATE KEY-----
+m9qLrTzKw8xVpQ2nB5cD7fGhJ4kM6uS
+-----END PRIVATE KEY-----
+db: DB_PASSWORD=correct horse battery staple
+done

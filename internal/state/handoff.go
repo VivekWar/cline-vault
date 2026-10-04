@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"vault/internal/heuristics"
 )
 
 // createHandoffArgs is the tools/call arguments for create_handoff.
@@ -145,7 +147,9 @@ func buildHandoff(args createHandoffArgs, acts []activityEntry, git string) stri
 	b.WriteString("\n\n## Git State & Checkpoint Tag\n")
 	b.WriteString(git)
 	b.WriteByte('\n')
-	return b.String()
+	// Feature D: the whole handoff is redacted, so secrets in any section
+	// (agent-supplied summaries, stderr excerpts, git status) never persist.
+	return heuristics.Redact(b.String())
 }
 
 // orNone renders an empty value as "_none_".

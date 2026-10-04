@@ -100,6 +100,8 @@ func (s *State) reportActivity(argsJSON json.RawMessage) (string, bool) {
 	if args.Files == nil {
 		args.Files = []string{}
 	}
+	// Feature D: redact secrets from stderr BEFORE it reaches the log.
+	args.Stderr = heuristics.Redact(args.Stderr)
 	// Snapshot the git tree for churn tracking. READ activities are pure
 	// observations: skipping the snapshot avoids a full `git add -A` +
 	// `git write-tree` per read (compactTrees ignores empty trees anyway).

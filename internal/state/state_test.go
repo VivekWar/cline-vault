@@ -321,6 +321,24 @@ func readHandoffFile(t *testing.T, st *State) string {
 	return string(data)
 }
 
+// TestReportActivityRedactsStderr: secrets in the stderr argument must be
+// masked before the activity line is appended to activity.jsonl.
+func TestReportActivityRedactsStderr(t *testing.T) {
+	st := New(t.TempDir())
+	mustReport(t, st, `{"kind":"COMMAND","command":"c","exit_code":1,"stderr":"token: sk-abcdefghijklmnopqrstuvwxyz","files":[]}`)
+	data, err := os.ReadFile(filepath.Join(st.vault, "activity.jsonl"))
+	if err != nil {
+		t.Fatalf("read activity.jsonl: %v", err)
+	}
+	raw := string(data)
+	if !strings.Contains(raw, "[REDACTED]") {
+		t.Errorf("activity line missing [REDACTED]: %s", raw)
+	}
+	if strings.Contains(raw, "sk-abcdefghijklmnopqrstuvwxyz") {
+		t.Errorf("raw API key persisted in activity log: %s", raw)
+	}
+}
+
 // TestReportActivitySkipsSnapshotForRead: READ activities must not trigger a
 // git snapshot (no `tree` field), while other kinds still record the tree
 // hash of the workspace.
