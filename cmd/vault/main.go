@@ -11,6 +11,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 
@@ -30,6 +31,9 @@ func main() {
 			return
 		case "report":
 			runReport(os.Args[2:])
+			return
+		case "serve":
+			runServe(os.Args[2:])
 			return
 		}
 	}
@@ -100,6 +104,29 @@ func runReportHTML(root string) {
 		os.Exit(1)
 	}
 	fmt.Fprintln(os.Stdout, "wrote "+path)
+}
+
+// runServe implements `vault serve [--root DIR] [--addr :8080]`: it registers
+// the dashboard routes on the DefaultServeMux — "/" serves the HTML shell
+// (head + HTMX script + polling div) and "/content" serves only the inner
+// content fragment that HTMX swaps in every second — then serves HTTP.
+func runServe(args []string) {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	fs.SetOutput(os.Stderr)
+	root := fs.String("root", "", "vault root (default VAULT_ROOT or cwd)")
+	addr := fs.String("addr", ":8080", "listen address")
+	if err := fs.Parse(args); err != nil {
+		os.Exit(2)
+	}
+
+	r := absRoot(*root)
+	http.HandleFunc("/", report.DashboardHandler(r))
+	http.HandleFunc("/content", report.ContentHandler(r))
+	log.Printf("vault serve: dashboard at http://localhost%s (root %s)", *addr, r)
+	if err := http.ListenAndServe(*addr, nil); err != nil {
+		log.Printf("vault serve: %v", err)
+		os.Exit(1)
+	}
 }
 
 // absRoot returns the absolute vault root for a CLI subcommand: the --root
